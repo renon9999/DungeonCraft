@@ -1,6 +1,9 @@
 package com.dungeoncraft.block;
 
 import com.dungeoncraft.DungeonCraft;
+import com.dungeoncraft.dungeon.DungeonSequenceData;
+import com.dungeoncraft.dungeon.DungeonReturnData;
+import com.dungeoncraft.dungeon.PrototypeDungeonGenerator;
 import java.util.Set;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.particles.ParticleTypes;
@@ -16,7 +19,6 @@ import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.level.BlockGetter;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Block;
-import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockBehaviour;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.BlockHitResult;
@@ -58,23 +60,17 @@ public final class DCPortalBlock extends Block {
             return InteractionResult.SUCCESS_SERVER;
         }
 
-        createTestPlatform(dungeon);
-        serverPlayer.teleportTo(dungeon, 0.5, 65.0, 0.5, Set.of(),
+        long dungeonId = DungeonSequenceData.get(serverPlayer.level().getServer()).allocateDungeonId();
+        PrototypeDungeonGenerator.GeneratedDungeon generated =
+                PrototypeDungeonGenerator.generate(dungeon, dungeonId);
+        DungeonReturnData.get(serverPlayer.level().getServer())
+                .recordReturn(serverPlayer, generated.returnSwitch());
+        BlockPos spawn = generated.spawn();
+        serverPlayer.teleportTo(dungeon, spawn.getX() + 0.5, spawn.getY(), spawn.getZ() + 0.5, Set.of(),
                 serverPlayer.getYRot(), serverPlayer.getXRot(), true);
         serverPlayer.sendOverlayMessage(
-                Component.translatable("message.dungeoncraft.portal.entered"));
+                Component.translatable("message.dungeoncraft.portal.entered", dungeonId));
         return InteractionResult.SUCCESS_SERVER;
-    }
-
-    private static void createTestPlatform(ServerLevel level) {
-        for (int x = -3; x <= 3; x++) {
-            for (int z = -3; z <= 3; z++) {
-                level.setBlock(new BlockPos(x, 64, z), Blocks.BEDROCK.defaultBlockState(), Block.UPDATE_ALL);
-                for (int y = 65; y <= 68; y++) {
-                    level.setBlock(new BlockPos(x, y, z), Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
-                }
-            }
-        }
     }
 
     @Override

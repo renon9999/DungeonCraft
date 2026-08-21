@@ -2,5 +2,6 @@
   "block.dungeoncraft.dc_portal": "DC Portal",
   "message.dungeoncraft.portal.overworld_only": "The DC Portal can only be used from the Overworld.",
   "message.dungeoncraft.portal.dimension_missing": "The Dungeon Dimension could not be loaded.",
-  "message.dungeoncraft.portal.entered": "Entered the Dungeon Dimension."
+  "message.dungeoncraft.portal.entered": "Entered Dungeon #%s.",
+  "message.dungeoncraft.returned": "Returned to the DC Portal."
 }

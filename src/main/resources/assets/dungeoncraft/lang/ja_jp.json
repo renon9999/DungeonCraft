@@ -2,5 +2,6 @@
   "block.dungeoncraft.dc_portal": "DCポータル",
   "message.dungeoncraft.portal.overworld_only": "DCポータルはオーバーワールドからのみ使用できます。",
   "message.dungeoncraft.portal.dimension_missing": "Dungeon Dimensionを読み込めませんでした。",
-  "message.dungeoncraft.portal.entered": "Dungeon Dimensionへ移動しました。"
+  "message.dungeoncraft.portal.entered": "Dungeon #%sへ移動しました。",
+  "message.dungeoncraft.returned": "DCポータル前へ帰還しました。"
 }

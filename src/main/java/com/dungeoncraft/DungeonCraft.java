@@ -1,6 +1,8 @@
 package com.dungeoncraft;
 
 import com.dungeoncraft.block.DCPortalBlock;
+import com.dungeoncraft.config.DungeonGenerationConfig;
+import com.dungeoncraft.event.DungeonInteractionEvents;
 import com.mojang.logging.LogUtils;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.resources.Identifier;
@@ -14,6 +16,8 @@ import net.minecraft.world.level.material.MapColor;
 import net.neoforged.bus.api.IEventBus;
 import net.neoforged.fml.ModContainer;
 import net.neoforged.fml.common.Mod;
+import net.neoforged.fml.config.ModConfig;
+import net.neoforged.neoforge.common.NeoForge;
 import net.neoforged.neoforge.event.BuildCreativeModeTabContentsEvent;
 import net.neoforged.neoforge.registries.DeferredBlock;
 import net.neoforged.neoforge.registries.DeferredItem;
@@ -47,6 +51,8 @@ public final class DungeonCraft {
         BLOCKS.register(modBus);
         ITEMS.register(modBus);
         modBus.addListener(this::addCreativeTabContents);
+        container.registerConfig(ModConfig.Type.SERVER, DungeonGenerationConfig.SPEC);
+        NeoForge.EVENT_BUS.register(DungeonInteractionEvents.class);
     }
 
     private void addCreativeTabContents(BuildCreativeModeTabContentsEvent event) {
