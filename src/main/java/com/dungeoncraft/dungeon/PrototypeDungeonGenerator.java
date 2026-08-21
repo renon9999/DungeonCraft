@@ -55,7 +55,18 @@ public final class PrototypeDungeonGenerator {
         BlockPos spawn = new BlockPos(start.centerX(), PLAYER_Y, start.centerZ());
         DungeonCraft.LOGGER.info("Generated Dungeon #{} with {} rooms at {}, {}",
                 dungeonId, rooms.size(), origin.getX(), origin.getZ());
-        return new GeneratedDungeon(dungeonId, spawn, returnSwitch, rooms.size());
+        List<GeneratedRoom> generatedRooms = new ArrayList<>();
+        for (int roomId = 0; roomId < rooms.size(); roomId++) {
+            Room room = rooms.get(roomId);
+            generatedRooms.add(new GeneratedRoom(
+                    roomId,
+                    room.centerX() - room.width() / 2 + 1,
+                    room.centerX() + room.width() / 2 - 1,
+                    room.centerZ() - room.roomDepth() / 2 + 1,
+                    room.centerZ() + room.roomDepth() / 2 - 1,
+                    room.role.name()));
+        }
+        return new GeneratedDungeon(dungeonId, spawn, returnSwitch, List.copyOf(generatedRooms));
     }
 
     private static List<Room> createRoomGraph(
@@ -323,7 +334,15 @@ public final class PrototypeDungeonGenerator {
         return lower + random.nextInt(upper - lower + 1);
     }
 
-    public record GeneratedDungeon(long dungeonId, BlockPos spawn, BlockPos returnSwitch, int roomCount) {
+    public record GeneratedDungeon(
+            long dungeonId, BlockPos spawn, BlockPos returnSwitch, List<GeneratedRoom> rooms) {
+        public int roomCount() {
+            return rooms.size();
+        }
+    }
+
+    public record GeneratedRoom(
+            int roomId, int minX, int maxX, int minZ, int maxZ, String role) {
     }
 
     private record GenerationParameters(

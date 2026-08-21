@@ -2,6 +2,7 @@ package com.dungeoncraft.block;
 
 import com.dungeoncraft.DungeonCraft;
 import com.dungeoncraft.dungeon.DungeonSequenceData;
+import com.dungeoncraft.dungeon.DungeonProgressData;
 import com.dungeoncraft.dungeon.DungeonReturnData;
 import com.dungeoncraft.dungeon.PrototypeDungeonGenerator;
 import java.util.Set;
@@ -65,6 +66,7 @@ public final class DCPortalBlock extends Block {
                 PrototypeDungeonGenerator.generate(dungeon, dungeonId);
         DungeonReturnData.get(serverPlayer.level().getServer())
                 .recordReturn(serverPlayer, generated.returnSwitch());
+        DungeonProgressData.get(serverPlayer.level().getServer()).startRun(serverPlayer, generated);
         BlockPos spawn = generated.spawn();
         serverPlayer.teleportTo(dungeon, spawn.getX() + 0.5, spawn.getY(), spawn.getZ() + 0.5, Set.of(),
                 serverPlayer.getYRot(), serverPlayer.getXRot(), true);

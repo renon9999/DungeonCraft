@@ -2,6 +2,8 @@ package com.dungeoncraft.event;
 
 import com.dungeoncraft.DungeonCraft;
 import com.dungeoncraft.dungeon.DungeonReturnData;
+import com.dungeoncraft.dungeon.DungeonProgressData;
+import com.dungeoncraft.dungeon.DungeonWaveSpawner;
 import java.util.Set;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.network.chat.Component;
@@ -15,9 +17,31 @@ import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Blocks;
 import net.neoforged.bus.api.SubscribeEvent;
 import net.neoforged.neoforge.event.entity.player.PlayerInteractEvent;
+import net.neoforged.neoforge.event.tick.PlayerTickEvent;
 
 public final class DungeonInteractionEvents {
     private DungeonInteractionEvents() {
+    }
+
+    @SubscribeEvent
+    public static void onPlayerTick(PlayerTickEvent.Post event) {
+        if (!(event.getEntity() instanceof ServerPlayer player)
+                || player.level().dimension() != DungeonCraft.DUNGEON_LEVEL) {
+            return;
+        }
+
+        DungeonProgressData.get(player.level().getServer())
+                .enterRoom(player.getUUID(), player.blockPosition())
+                .ifPresent(room -> {
+                    if (room.isCombat()) {
+                        int enemyCount = DungeonWaveSpawner.spawnFirstWave((ServerLevel)player.level(), room);
+                        player.sendOverlayMessage(Component.translatable(
+                                "message.dungeoncraft.wave.started", room.roomId() + 1, enemyCount));
+                    } else {
+                        player.sendOverlayMessage(Component.translatable(
+                                "message.dungeoncraft.room.entered", room.roomId() + 1, room.role()));
+                    }
+                });
     }
 
     @SubscribeEvent
@@ -39,6 +63,7 @@ public final class DungeonInteractionEvents {
             }
             player.teleportTo(returnLevel, target.x(), target.y(), target.z(), Set.of(),
                     player.getYRot(), player.getXRot(), true);
+            DungeonProgressData.get(player.level().getServer()).endRun(player.getUUID());
             player.sendOverlayMessage(Component.translatable("message.dungeoncraft.returned"));
         });
 

@@ -3,5 +3,7 @@
   "message.dungeoncraft.portal.overworld_only": "DCポータルはオーバーワールドからのみ使用できます。",
   "message.dungeoncraft.portal.dimension_missing": "Dungeon Dimensionを読み込めませんでした。",
   "message.dungeoncraft.portal.entered": "Dungeon #%sへ移動しました。",
-  "message.dungeoncraft.returned": "DCポータル前へ帰還しました。"
+  "message.dungeoncraft.returned": "DCポータル前へ帰還しました。",
+  "message.dungeoncraft.room.entered": "Room %s に入りました（%s）",
+  "message.dungeoncraft.wave.started": "Room %s：Wave開始（Zombie ×%s）"
 }
