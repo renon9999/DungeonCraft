@@ -6,7 +6,6 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 import java.util.Random;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerLevel;
@@ -32,38 +31,29 @@ public final class PrototypeDungeonGenerator {
 
     public static GeneratedDungeon generate(ServerLevel level, long dungeonId) {
         GenerationParameters parameters = GenerationParameters.fromConfig();
-        Random random = new Random(level.getSeed() ^ dungeonId * 0x9E3779B97F4A7C15L);
-        List<GeneratedFloor> floors = new ArrayList<>();
-        int nextRoomId = 0;
-        for (int floorIndex = 0; floorIndex < parameters.floorCount(); floorIndex++) {
-            GeneratedFloor floor = generateFloor(
-                    level, dungeonId, floorIndex, nextRoomId, parameters, random);
-            floors.add(floor);
-            nextRoomId += floor.rooms().size();
-        }
-
-        List<GeneratedRoom> allRooms = floors.stream().flatMap(floor -> floor.rooms().stream()).toList();
-        List<GeneratedFloorExit> floorExits = new ArrayList<>();
-        for (int floorIndex = 0; floorIndex < floors.size(); floorIndex++) {
-            GeneratedFloor floor = floors.get(floorIndex);
-            Optional<BlockPos> nextSpawn = floorIndex + 1 < floors.size()
-                    ? Optional.of(floors.get(floorIndex + 1).spawn())
-                    : Optional.empty();
-            floorExits.add(new GeneratedFloorExit(
-                    floor.floorNumber(), floor.exitSwitch(), nextSpawn));
-        }
-
-        GeneratedFloor firstFloor = floors.getFirst();
-        DungeonCraft.LOGGER.info("Generated Dungeon #{} with {} floors and {} rooms",
-                dungeonId, floors.size(), allRooms.size());
+        GeneratedFloor firstFloor = generateFloor(level, dungeonId, 1, 0, parameters);
+        DungeonCraft.LOGGER.info("Started Dungeon #{} with Floor 1 of {} generated",
+                dungeonId, parameters.floorCount());
         return new GeneratedDungeon(
-                dungeonId, firstFloor.spawn(), firstFloor.returnSwitch(),
-                List.copyOf(floorExits), allRooms);
+                dungeonId, parameters.floorCount(), firstFloor.spawn(), firstFloor.returnSwitch(),
+                new GeneratedFloorExit(firstFloor.floorNumber(), firstFloor.exitSwitch()),
+                firstFloor.rooms());
+    }
+
+    public static GeneratedFloor generateNextFloor(
+            ServerLevel level, long dungeonId, int floorNumber, int firstRoomId) {
+        return generateFloor(
+                level, dungeonId, floorNumber, firstRoomId, GenerationParameters.fromConfig());
     }
 
     private static GeneratedFloor generateFloor(
-            ServerLevel level, long dungeonId, int floorIndex, int firstRoomId,
-            GenerationParameters parameters, Random random) {
+            ServerLevel level, long dungeonId, int floorNumber, int firstRoomId,
+            GenerationParameters parameters) {
+        int floorIndex = floorNumber - 1;
+        Random random = new Random(
+                level.getSeed()
+                        ^ dungeonId * 0x9E3779B97F4A7C15L
+                        ^ floorNumber * 0xC2B2AE3D27D4EB4FL);
         BlockPos origin = originFor(dungeonId, floorIndex);
         int targetRooms = between(random, parameters.minRooms(), parameters.maxRooms());
 
@@ -112,7 +102,7 @@ public final class PrototypeDungeonGenerator {
                     List.copyOf(room.exitSealBlocks)));
         }
         return new GeneratedFloor(
-                floorIndex + 1, spawn, returnSwitch, exitSwitch, List.copyOf(generatedRooms));
+                floorNumber, spawn, returnSwitch, exitSwitch, List.copyOf(generatedRooms));
     }
 
     private static List<Room> createRoomGraph(
@@ -426,26 +416,20 @@ public final class PrototypeDungeonGenerator {
     }
 
     public record GeneratedDungeon(
-            long dungeonId, BlockPos spawn, BlockPos returnSwitch,
-            List<GeneratedFloorExit> floorExits,
+            long dungeonId, int floorCount, BlockPos spawn, BlockPos returnSwitch,
+            GeneratedFloorExit floorExit,
             List<GeneratedRoom> rooms) {
         public int roomCount() {
             return rooms.size();
         }
 
-        public int floorCount() {
-            return floorExits.size();
-        }
     }
 
     public record GeneratedFloorExit(
-            int floorNumber, BlockPos switchPosition, Optional<BlockPos> nextFloorSpawn) {
-        public boolean isFinalFloor() {
-            return nextFloorSpawn.isEmpty();
-        }
+            int floorNumber, BlockPos switchPosition) {
     }
 
-    private record GeneratedFloor(
+    public record GeneratedFloor(
             int floorNumber, BlockPos spawn, BlockPos returnSwitch, BlockPos exitSwitch,
             List<GeneratedRoom> rooms) {
     }

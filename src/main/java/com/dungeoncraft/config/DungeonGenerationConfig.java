@@ -7,10 +7,10 @@ public final class DungeonGenerationConfig {
 
     public static final ModConfigSpec.IntValue MIN_ROOMS = BUILDER
             .comment("Minimum number of rooms in a generated prototype dungeon.")
-            .defineInRange("generation.minRooms", 4, 4, 20);
+            .defineInRange("generation.minRooms", 6, 4, 20);
     public static final ModConfigSpec.IntValue MAX_ROOMS = BUILDER
             .comment("Maximum number of rooms in a generated prototype dungeon.")
-            .defineInRange("generation.maxRooms", 4, 4, 20);
+            .defineInRange("generation.maxRooms", 8, 4, 20);
     public static final ModConfigSpec.IntValue FLOOR_COUNT = BUILDER
             .comment("Number of floors generated for one dungeon run.")
             .defineInRange("generation.floorCount", 3, 1, 16);
@@ -44,6 +44,9 @@ public final class DungeonGenerationConfig {
     public static final ModConfigSpec.IntValue COMBAT_ENEMY_COUNT = BUILDER
             .comment("Number of zombies spawned once when entering a COMBAT room.")
             .defineInRange("combat.enemyCount", 1, 1, 20);
+    public static final ModConfigSpec.IntValue MAX_PARTY_SIZE = BUILDER
+            .comment("Maximum number of players allowed in one dungeon party.")
+            .defineInRange("multiplayer.maxPartySize", 8, 1, 8);
     public static final ModConfigSpec.DoubleValue EXTRA_CHEST_CHANCE = BUILDER
             .comment("Chance for a NORMAL or COMBAT room to contain a chest. LOOT rooms always contain one.")
             .defineInRange("loot.extraChestChance", 0.25, 0.0, 1.0);

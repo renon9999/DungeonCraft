@@ -5,6 +5,7 @@ import com.dungeoncraft.dungeon.DungeonReturnData;
 import com.dungeoncraft.dungeon.DungeonProgressData;
 import com.dungeoncraft.dungeon.DungeonRoomEnemySpawner;
 import com.dungeoncraft.dungeon.DungeonRoomSealer;
+import com.dungeoncraft.dungeon.PrototypeDungeonGenerator;
 import java.util.Set;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.entity.Entity;
@@ -104,10 +105,12 @@ public final class DungeonInteractionEvents {
 
         DungeonProgressData.get(level.getServer()).removeRoomEnemy(entity.getUUID()).ifPresent(cleared -> {
             DungeonRoomSealer.open(level, cleared.exitSealBlocks());
-            ServerPlayer player = level.getServer().getPlayerList().getPlayer(cleared.playerId());
-            if (player != null) {
-                player.sendOverlayMessage(Component.translatable(
-                        "message.dungeoncraft.room.cleared", cleared.roomId() + 1));
+            for (var memberId : cleared.memberIds()) {
+                ServerPlayer member = level.getServer().getPlayerList().getPlayer(memberId);
+                if (member != null) {
+                    member.sendOverlayMessage(Component.translatable(
+                            "message.dungeoncraft.room.cleared", cleared.roomId() + 1));
+                }
             }
         });
     }
@@ -125,8 +128,16 @@ public final class DungeonInteractionEvents {
         var floorExit = progress.findFloorExit(player.getUUID(), event.getPos());
         if (floorExit.isPresent() && !floorExit.orElseThrow().isFinalFloor()) {
             DungeonProgressData.FloorExitAction action = floorExit.orElseThrow();
-            BlockPos nextSpawn = action.nextFloorSpawn().orElseThrow();
-            player.teleportTo((ServerLevel)player.level(),
+            ServerLevel dungeonLevel = (ServerLevel)player.level();
+            PrototypeDungeonGenerator.GeneratedFloor nextFloor =
+                    PrototypeDungeonGenerator.generateNextFloor(
+                            dungeonLevel, action.dungeonId(),
+                            action.floorNumber() + 1, action.nextRoomId());
+            if (!progress.advanceToFloor(player.getUUID(), action.floorNumber(), nextFloor)) {
+                return;
+            }
+            BlockPos nextSpawn = nextFloor.spawn();
+            player.teleportTo(dungeonLevel,
                     nextSpawn.getX() + 0.5, nextSpawn.getY(), nextSpawn.getZ() + 0.5,
                     Set.of(), player.getYRot(), player.getXRot(), true);
             player.sendOverlayMessage(Component.translatable(

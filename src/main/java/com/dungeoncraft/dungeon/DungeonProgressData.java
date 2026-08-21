@@ -16,7 +16,7 @@ import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.level.saveddata.SavedData;
 import net.minecraft.world.level.saveddata.SavedDataType;
 
-/** Persistent room bounds and entry state for each player's active dungeon run. */
+/** Persistent shared state for active dungeon runs and their party members. */
 public final class DungeonProgressData extends SavedData {
     private static final Codec<SealPosition> SEAL_POSITION_CODEC = RecordCodecBuilder.create(instance -> instance.group(
             Codec.INT.fieldOf("x").forGetter(SealPosition::x),
@@ -47,24 +47,37 @@ public final class DungeonProgressData extends SavedData {
 
     private static final Codec<FloorExitState> FLOOR_EXIT_CODEC = RecordCodecBuilder.create(instance -> instance.group(
             Codec.INT.fieldOf("floor_number").forGetter(FloorExitState::floorNumber),
-            SEAL_POSITION_CODEC.fieldOf("switch_position").forGetter(FloorExitState::switchPosition),
-            SEAL_POSITION_CODEC.optionalFieldOf("next_floor_spawn").forGetter(FloorExitState::nextFloorSpawn)
+            SEAL_POSITION_CODEC.fieldOf("switch_position").forGetter(FloorExitState::switchPosition)
     ).apply(instance, FloorExitState::new));
 
     private static final Codec<RunState> RUN_CODEC = RecordCodecBuilder.create(instance -> instance.group(
-            Codec.STRING.fieldOf("player").forGetter(run -> run.playerId().toString()),
+            Codec.STRING.fieldOf("player").forGetter(run -> run.leaderId().toString()),
             Codec.LONG.fieldOf("dungeon_id").forGetter(RunState::dungeonId),
+            Codec.STRING.listOf().optionalFieldOf("members", List.of()).forGetter(run ->
+                    run.memberIds().stream().map(UUID::toString).toList()),
+            Codec.INT.optionalFieldOf("current_floor", 1).forGetter(RunState::currentFloor),
+            Codec.INT.optionalFieldOf("floor_count", 1).forGetter(RunState::floorCount),
             ROOM_CODEC.listOf().fieldOf("rooms").forGetter(RunState::rooms),
             ROOM_COMBAT_CODEC.listOf().optionalFieldOf("active_room_combats", List.of())
                     .forGetter(RunState::activeRoomCombats),
             FLOOR_EXIT_CODEC.listOf().optionalFieldOf("floor_exits", List.of()).forGetter(RunState::floorExits)
-    ).apply(instance, (player, dungeonId, rooms, activeRoomCombats, floorExits) ->
-            new RunState(
-                    UUID.fromString(player),
+    ).apply(instance, (player, dungeonId, members, currentFloor, floorCount,
+                       rooms, activeRoomCombats, floorExits) -> {
+        UUID leaderId = UUID.fromString(player);
+        List<UUID> memberIds = members.isEmpty()
+                ? new ArrayList<>(List.of(leaderId))
+                : members.stream().map(UUID::fromString)
+                        .collect(java.util.stream.Collectors.toCollection(ArrayList::new));
+        return new RunState(
+                    leaderId,
                     dungeonId,
+                    memberIds,
+                    currentFloor,
+                    floorCount,
                     new ArrayList<>(rooms),
                     new ArrayList<>(activeRoomCombats),
-                    new ArrayList<>(floorExits))));
+                    new ArrayList<>(floorExits));
+    }));
 
     private static final Codec<DungeonProgressData> CODEC = RecordCodecBuilder.create(instance -> instance.group(
             RUN_CODEC.listOf().optionalFieldOf("runs", List.of()).forGetter(DungeonProgressData::savedRuns)
@@ -75,14 +88,15 @@ public final class DungeonProgressData extends SavedData {
             DungeonProgressData::new,
             CODEC);
 
-    private final Map<UUID, RunState> runs = new HashMap<>();
+    private final Map<Long, RunState> runs = new HashMap<>();
+    private final Map<UUID, Long> playerRuns = new HashMap<>();
 
     public DungeonProgressData() {
         this(List.of());
     }
 
     private DungeonProgressData(List<RunState> savedRuns) {
-        savedRuns.forEach(run -> runs.put(run.playerId(), run));
+        savedRuns.forEach(this::registerRun);
     }
 
     public static DungeonProgressData get(MinecraftServer server) {
@@ -90,39 +104,51 @@ public final class DungeonProgressData extends SavedData {
     }
 
     public void startRun(ServerPlayer player, PrototypeDungeonGenerator.GeneratedDungeon dungeon) {
-        List<RoomState> rooms = dungeon.rooms().stream()
-                .map(room -> new RoomState(
-                        room.roomId(), room.minX(), room.maxX(), room.minZ(), room.maxZ(), room.role(),
-                        false, false,
-                        room.exitSealBlocks().stream().map(SealPosition::fromBlockPos).toList()))
-                .toList();
-        List<FloorExitState> floorExits = dungeon.floorExits().stream()
-                .map(exit -> new FloorExitState(
-                        exit.floorNumber(),
-                        SealPosition.fromBlockPos(exit.switchPosition()),
-                        exit.nextFloorSpawn().map(SealPosition::fromBlockPos)))
-                .toList();
-        runs.put(player.getUUID(), new RunState(
-                player.getUUID(), dungeon.dungeonId(), new ArrayList<>(rooms), new ArrayList<>(),
+        endRun(player.getUUID());
+        List<RoomState> rooms = createRoomStates(dungeon.rooms());
+        List<FloorExitState> floorExits = List.of(new FloorExitState(
+                dungeon.floorExit().floorNumber(),
+                SealPosition.fromBlockPos(dungeon.floorExit().switchPosition())));
+        registerRun(new RunState(
+                player.getUUID(), dungeon.dungeonId(), new ArrayList<>(List.of(player.getUUID())),
+                1, dungeon.floorCount(), new ArrayList<>(rooms), new ArrayList<>(),
                 new ArrayList<>(floorExits)));
         setDirty();
     }
 
     public Optional<FloorExitAction> findFloorExit(UUID playerId, BlockPos position) {
-        RunState run = runs.get(playerId);
+        RunState run = runFor(playerId);
         if (run == null) {
             return Optional.empty();
         }
         return run.floorExits().stream()
+                .filter(exit -> exit.floorNumber() == run.currentFloor())
                 .filter(exit -> exit.switchPosition().toBlockPos().equals(position))
                 .findFirst()
                 .map(exit -> new FloorExitAction(
-                        exit.floorNumber(), run.floorExits().size(),
-                        exit.nextFloorSpawn().map(SealPosition::toBlockPos)));
+                        run.dungeonId(), exit.floorNumber(), run.floorCount(), nextRoomId(run)));
+    }
+
+    public boolean advanceToFloor(
+            UUID playerId, int expectedCurrentFloor,
+            PrototypeDungeonGenerator.GeneratedFloor floor) {
+        RunState run = runFor(playerId);
+        if (run == null
+                || run.currentFloor() != expectedCurrentFloor
+                || floor.floorNumber() != expectedCurrentFloor + 1
+                || floor.floorNumber() > run.floorCount()) {
+            return false;
+        }
+        run.rooms().addAll(createRoomStates(floor.rooms()));
+        run.floorExits().add(new FloorExitState(
+                floor.floorNumber(), SealPosition.fromBlockPos(floor.exitSwitch())));
+        run.currentFloor = floor.floorNumber();
+        setDirty();
+        return true;
     }
 
     public void startRoomCombat(UUID playerId, int roomId, List<UUID> enemyIds) {
-        RunState run = runs.get(playerId);
+        RunState run = runFor(playerId);
         if (run == null) {
             return;
         }
@@ -143,7 +169,7 @@ public final class DungeonProgressData extends SavedData {
                     run.activeRoomCombats().remove(index);
                     List<BlockPos> exitSeals = markRoomCleared(run, combat.roomId());
                     return Optional.of(new RoomCleared(
-                            run.playerId(), run.dungeonId(), combat.roomId(), exitSeals));
+                            List.copyOf(run.memberIds()), run.dungeonId(), combat.roomId(), exitSeals));
                 }
                 return Optional.empty();
             }
@@ -152,7 +178,7 @@ public final class DungeonProgressData extends SavedData {
     }
 
     public Optional<EnteredRoom> enterRoom(UUID playerId, BlockPos position) {
-        RunState run = runs.get(playerId);
+        RunState run = runFor(playerId);
         if (run == null) {
             return Optional.empty();
         }
@@ -175,7 +201,7 @@ public final class DungeonProgressData extends SavedData {
     }
 
     public List<BlockPos> clearRoom(UUID playerId, int roomId) {
-        RunState run = runs.get(playerId);
+        RunState run = runFor(playerId);
         if (run == null) {
             return List.of();
         }
@@ -195,26 +221,84 @@ public final class DungeonProgressData extends SavedData {
         return List.of();
     }
 
+    private static List<RoomState> createRoomStates(
+            List<PrototypeDungeonGenerator.GeneratedRoom> generatedRooms) {
+        return generatedRooms.stream()
+                .map(room -> new RoomState(
+                        room.roomId(), room.minX(), room.maxX(), room.minZ(), room.maxZ(), room.role(),
+                        false, false,
+                        room.exitSealBlocks().stream().map(SealPosition::fromBlockPos).toList()))
+                .toList();
+    }
+
+    private static int nextRoomId(RunState run) {
+        return run.rooms().stream().mapToInt(RoomState::roomId).max().orElse(-1) + 1;
+    }
+
     public void endRun(UUID playerId) {
-        if (runs.remove(playerId) != null) {
+        Long dungeonId = playerRuns.get(playerId);
+        if (dungeonId == null) {
+            return;
+        }
+        RunState removed = runs.remove(dungeonId);
+        if (removed != null) {
+            removed.memberIds().forEach(playerRuns::remove);
             setDirty();
         }
+    }
+
+    private RunState runFor(UUID playerId) {
+        Long dungeonId = playerRuns.get(playerId);
+        return dungeonId == null ? null : runs.get(dungeonId);
+    }
+
+    private void registerRun(RunState run) {
+        runs.put(run.dungeonId(), run);
+        run.memberIds().forEach(memberId -> playerRuns.put(memberId, run.dungeonId()));
     }
 
     private List<RunState> savedRuns() {
         return List.copyOf(runs.values());
     }
 
-    private record RunState(
-            UUID playerId, long dungeonId, List<RoomState> rooms,
-            List<RoomCombatState> activeRoomCombats, List<FloorExitState> floorExits) {
+    private static final class RunState {
+        private final UUID leaderId;
+        private final long dungeonId;
+        private final List<UUID> memberIds;
+        private int currentFloor;
+        private final int floorCount;
+        private final List<RoomState> rooms;
+        private final List<RoomCombatState> activeRoomCombats;
+        private final List<FloorExitState> floorExits;
+
+        private RunState(
+                UUID leaderId, long dungeonId, List<UUID> memberIds,
+                int currentFloor, int floorCount, List<RoomState> rooms,
+                List<RoomCombatState> activeRoomCombats, List<FloorExitState> floorExits) {
+            this.leaderId = leaderId;
+            this.dungeonId = dungeonId;
+            this.memberIds = memberIds;
+            this.currentFloor = currentFloor;
+            this.floorCount = floorCount;
+            this.rooms = rooms;
+            this.activeRoomCombats = activeRoomCombats;
+            this.floorExits = floorExits;
+        }
+
+        private UUID leaderId() { return leaderId; }
+        private long dungeonId() { return dungeonId; }
+        private List<UUID> memberIds() { return memberIds; }
+        private int currentFloor() { return currentFloor; }
+        private int floorCount() { return floorCount; }
+        private List<RoomState> rooms() { return rooms; }
+        private List<RoomCombatState> activeRoomCombats() { return activeRoomCombats; }
+        private List<FloorExitState> floorExits() { return floorExits; }
     }
 
     private record RoomCombatState(int roomId, List<UUID> enemyIds) {
     }
 
-    private record FloorExitState(
-            int floorNumber, SealPosition switchPosition, Optional<SealPosition> nextFloorSpawn) {
+    private record FloorExitState(int floorNumber, SealPosition switchPosition) {
     }
 
     private record RoomState(
@@ -269,13 +353,13 @@ public final class DungeonProgressData extends SavedData {
     }
 
     public record RoomCleared(
-            UUID playerId, long dungeonId, int roomId, List<BlockPos> exitSealBlocks) {
+            List<UUID> memberIds, long dungeonId, int roomId, List<BlockPos> exitSealBlocks) {
     }
 
     public record FloorExitAction(
-            int floorNumber, int floorCount, Optional<BlockPos> nextFloorSpawn) {
+            long dungeonId, int floorNumber, int floorCount, int nextRoomId) {
         public boolean isFinalFloor() {
-            return nextFloorSpawn.isEmpty();
+            return floorNumber >= floorCount;
         }
     }
 
