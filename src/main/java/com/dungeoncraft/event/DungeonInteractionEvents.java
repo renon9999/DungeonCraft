@@ -3,9 +3,15 @@ package com.dungeoncraft.event;
 import com.dungeoncraft.DungeonCraft;
 import com.dungeoncraft.dungeon.DungeonReturnData;
 import com.dungeoncraft.dungeon.DungeonProgressData;
+import com.dungeoncraft.dungeon.DungeonModifierEffects;
 import com.dungeoncraft.dungeon.DungeonRoomEnemySpawner;
 import com.dungeoncraft.dungeon.DungeonRoomSealer;
 import com.dungeoncraft.dungeon.PrototypeDungeonGenerator;
+import com.dungeoncraft.network.ActiveModifiersHudPayload;
+import com.dungeoncraft.network.FloorChoiceHudPayload;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.entity.Entity;
@@ -25,9 +31,16 @@ import net.neoforged.neoforge.event.entity.player.PlayerInteractEvent;
 import net.neoforged.neoforge.event.entity.player.PlayerEvent;
 import net.neoforged.neoforge.event.entity.EntityLeaveLevelEvent;
 import net.neoforged.neoforge.event.entity.living.LivingDeathEvent;
+import net.neoforged.neoforge.event.entity.living.LivingExperienceDropEvent;
 import net.neoforged.neoforge.event.tick.PlayerTickEvent;
+import net.neoforged.neoforge.network.PacketDistributor;
 
 public final class DungeonInteractionEvents {
+    private static final double CHOICE_HUD_SHOW_DISTANCE_SQUARED = 16.0;
+    private static final double CHOICE_HUD_HIDE_DISTANCE_SQUARED = 25.0;
+    private static final Map<java.util.UUID, ChoiceHudKey> VISIBLE_CHOICES = new HashMap<>();
+    private static final Map<java.util.UUID, List<ActiveModifierKey>> ACTIVE_MODIFIER_STATES = new HashMap<>();
+
     private DungeonInteractionEvents() {
     }
 
@@ -38,8 +51,10 @@ public final class DungeonInteractionEvents {
             return;
         }
 
-        DungeonProgressData.get(player.level().getServer())
-                .enterRoom(player.getUUID(), player.blockPosition())
+        DungeonProgressData progress = DungeonProgressData.get(player.level().getServer());
+        updateChoiceHud(player, progress);
+        updateActiveModifierHud(player, progress);
+        progress.enterRoom(player.getUUID(), player.blockPosition())
                 .ifPresent(room -> {
                     if (room.isCombat()) {
                         DungeonRoomEnemySpawner.SpawnedEnemies enemies =
@@ -62,15 +77,81 @@ public final class DungeonInteractionEvents {
                 });
     }
 
+    private static void updateActiveModifierHud(ServerPlayer player, DungeonProgressData progress) {
+        if (player.tickCount % 5 != 0) {
+            return;
+        }
+        List<ActiveModifierKey> next = progress.activeModifiers(player.getUUID()).stream()
+                .map(modifier -> new ActiveModifierKey(
+                        modifier.id(), modifier.tier(), modifier.positive()))
+                .toList();
+        if (next.equals(ACTIVE_MODIFIER_STATES.get(player.getUUID()))) {
+            return;
+        }
+        ACTIVE_MODIFIER_STATES.put(player.getUUID(), next);
+        var payloadModifiers = next.stream()
+                .map(modifier -> new ActiveModifiersHudPayload.ModifierEntry(
+                        modifier.id(), modifier.tier(), modifier.positive()))
+                .toList();
+        PacketDistributor.sendToPlayer(player, new ActiveModifiersHudPayload(true, payloadModifiers));
+    }
+
+    private static void updateChoiceHud(ServerPlayer player, DungeonProgressData progress) {
+        if (player.tickCount % 5 != 0) {
+            return;
+        }
+        ChoiceHudKey current = VISIBLE_CHOICES.get(player.getUUID());
+        double radiusSquared = current == null
+                ? CHOICE_HUD_SHOW_DISTANCE_SQUARED
+                : CHOICE_HUD_HIDE_DISTANCE_SQUARED;
+        var nearby = progress.nearestFloorChoice(
+                player.getUUID(), player.blockPosition(), radiusSquared);
+        if (nearby.isEmpty()) {
+            if (VISIBLE_CHOICES.remove(player.getUUID()) != null) {
+                PacketDistributor.sendToPlayer(player, FloorChoiceHudPayload.hidden());
+            }
+            return;
+        }
+
+        var choice = nearby.orElseThrow();
+        ChoiceHudKey next = new ChoiceHudKey(choice.floorNumber(), choice.choiceIndex());
+        if (next.equals(current)) {
+            return;
+        }
+        VISIBLE_CHOICES.put(player.getUUID(), next);
+        var modifiers = choice.modifiers().stream()
+                .map(modifier -> new FloorChoiceHudPayload.ModifierEntry(
+                        modifier.id(), modifier.tier(), modifier.positive()))
+                .toList();
+        PacketDistributor.sendToPlayer(player, new FloorChoiceHudPayload(
+                true, choice.choiceIndex(), choice.modifierScore(), modifiers));
+    }
+
     @SubscribeEvent
     public static void onLivingDeath(LivingDeathEvent event) {
         if (event.getEntity() instanceof ServerPlayer player
                 && player.level().dimension() == DungeonCraft.DUNGEON_LEVEL) {
             DungeonProgressData.get(player.level().getServer()).endRun(player.getUUID());
+            VISIBLE_CHOICES.remove(player.getUUID());
+            ACTIVE_MODIFIER_STATES.remove(player.getUUID());
+            PacketDistributor.sendToPlayer(player, ActiveModifiersHudPayload.hidden());
             DungeonReturnData.get(player.level().getServer()).discardReturn(player.getUUID());
             return;
         }
         handleRoomEnemyRemoved(event.getEntity());
+    }
+
+    @SubscribeEvent
+    public static void onLivingExperienceDrop(LivingExperienceDropEvent event) {
+        if (!(event.getAttackingPlayer() instanceof ServerPlayer player)
+                || player.level().dimension() != DungeonCraft.DUNGEON_LEVEL
+                || !event.getEntity().entityTags().contains("dungeoncraft_room_enemy")) {
+            return;
+        }
+        var modifiers = DungeonProgressData.get(player.level().getServer())
+                .activeModifiers(player.getUUID());
+        double multiplier = DungeonModifierEffects.experienceMultiplier(modifiers);
+        event.setDroppedExperience((int)Math.round(event.getOriginalExperience() * multiplier));
     }
 
     @SubscribeEvent
@@ -90,10 +171,18 @@ public final class DungeonInteractionEvents {
         }
 
         DungeonProgressData.get(player.level().getServer()).endRun(player.getUUID());
+        VISIBLE_CHOICES.remove(player.getUUID());
+        ACTIVE_MODIFIER_STATES.remove(player.getUUID());
         DungeonReturnData.get(player.level().getServer()).discardReturn(player.getUUID());
         TeleportTransition respawn = player.findRespawnPositionAndUseSpawnBlock(
                 false, TeleportTransition.DO_NOTHING);
         player.teleport(respawn);
+    }
+
+    private record ChoiceHudKey(int floorNumber, int choiceIndex) {
+    }
+
+    private record ActiveModifierKey(String id, int tier, boolean positive) {
     }
 
     private static void handleRoomEnemyRemoved(Entity entity) {
@@ -129,11 +218,16 @@ public final class DungeonInteractionEvents {
         if (floorExit.isPresent() && !floorExit.orElseThrow().isFinalFloor()) {
             DungeonProgressData.FloorExitAction action = floorExit.orElseThrow();
             ServerLevel dungeonLevel = (ServerLevel)player.level();
+            var nextModifiers = progress.modifiersAfterSelection(
+                    player.getUUID(), action.modifiers());
             PrototypeDungeonGenerator.GeneratedFloor nextFloor =
                     PrototypeDungeonGenerator.generateNextFloor(
                             dungeonLevel, action.dungeonId(),
-                            action.floorNumber() + 1, action.nextRoomId());
-            if (!progress.advanceToFloor(player.getUUID(), action.floorNumber(), nextFloor)) {
+                            action.floorNumber() + 1, action.nextRoomId(),
+                            action.choiceIndex(), action.floorNumber() + 1 >= action.floorCount(),
+                            nextModifiers);
+            if (!progress.advanceToFloor(
+                    player.getUUID(), action.floorNumber(), nextFloor, action.modifiers())) {
                 return;
             }
             BlockPos nextSpawn = nextFloor.spawn();
@@ -141,7 +235,8 @@ public final class DungeonInteractionEvents {
                     nextSpawn.getX() + 0.5, nextSpawn.getY(), nextSpawn.getZ() + 0.5,
                     Set.of(), player.getYRot(), player.getXRot(), true);
             player.sendOverlayMessage(Component.translatable(
-                    "message.dungeoncraft.floor.entered", action.floorNumber() + 1, action.floorCount()));
+                    "message.dungeoncraft.floor.choice_entered",
+                    action.choiceIndex() + 1, action.floorNumber() + 1, action.floorCount()));
             event.setCanceled(true);
             event.setCancellationResult(InteractionResult.SUCCESS_SERVER);
             return;
@@ -164,6 +259,9 @@ public final class DungeonInteractionEvents {
             returnLevel = player.level().getServer().overworld();
         }
         progress.endRun(player.getUUID());
+        VISIBLE_CHOICES.remove(player.getUUID());
+        ACTIVE_MODIFIER_STATES.remove(player.getUUID());
+        PacketDistributor.sendToPlayer(player, ActiveModifiersHudPayload.hidden());
         player.teleportTo(returnLevel, target.x(), target.y(), target.z(), Set.of(),
                 player.getYRot(), player.getXRot(), true);
         player.sendOverlayMessage(Component.translatable(dungeonExit

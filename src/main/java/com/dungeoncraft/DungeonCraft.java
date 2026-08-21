@@ -3,6 +3,7 @@ package com.dungeoncraft;
 import com.dungeoncraft.block.DCPortalBlock;
 import com.dungeoncraft.config.DungeonGenerationConfig;
 import com.dungeoncraft.event.DungeonInteractionEvents;
+import com.dungeoncraft.network.DungeonNetwork;
 import com.mojang.logging.LogUtils;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.resources.Identifier;
@@ -51,6 +52,7 @@ public final class DungeonCraft {
         BLOCKS.register(modBus);
         ITEMS.register(modBus);
         modBus.addListener(this::addCreativeTabContents);
+        modBus.addListener(DungeonNetwork::registerPayloads);
         container.registerConfig(ModConfig.Type.SERVER, DungeonGenerationConfig.SPEC);
         NeoForge.EVENT_BUS.register(DungeonInteractionEvents.class);
     }

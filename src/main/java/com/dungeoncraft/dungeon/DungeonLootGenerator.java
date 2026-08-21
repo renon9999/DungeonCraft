@@ -7,10 +7,12 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Random;
 import net.minecraft.core.BlockPos;
+import net.minecraft.util.RandomSource;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
+import net.minecraft.world.item.enchantment.EnchantmentHelper;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.entity.ChestBlockEntity;
@@ -23,18 +25,36 @@ public final class DungeonLootGenerator {
             Items.COAL, Items.IRON_INGOT, Items.GOLD_INGOT, Items.REDSTONE);
     private static final List<Item> EQUIPMENT = List.of(
             Items.IRON_SWORD, Items.BOW, Items.SHIELD, Items.IRON_HELMET, Items.IRON_CHESTPLATE);
+    private static final List<Item> LOW_ORES = List.of(
+            Items.COAL, Items.RAW_COPPER, Items.RAW_IRON);
+    private static final List<Item> MID_ORES = List.of(
+            Items.COAL, Items.RAW_COPPER, Items.RAW_IRON,
+            Items.RAW_GOLD, Items.REDSTONE, Items.LAPIS_LAZULI);
+    private static final List<Item> HIGH_ORES = List.of(
+            Items.COAL, Items.RAW_IRON, Items.RAW_GOLD,
+            Items.REDSTONE, Items.LAPIS_LAZULI, Items.DIAMOND, Items.EMERALD);
+    private static final List<Item> QUALITY_T1 = List.of(
+            Items.DIAMOND_SWORD, Items.DIAMOND_PICKAXE, Items.DIAMOND_HELMET);
+    private static final List<Item> QUALITY_T2 = List.of(
+            Items.DIAMOND_SWORD, Items.DIAMOND_PICKAXE, Items.DIAMOND_CHESTPLATE,
+            Items.DIAMOND_BOOTS, Items.GOLDEN_APPLE);
+    private static final List<Item> QUALITY_T3 = List.of(
+            Items.NETHERITE_SWORD, Items.NETHERITE_PICKAXE, Items.NETHERITE_CHESTPLATE,
+            Items.ENCHANTED_GOLDEN_APPLE, Items.TOTEM_OF_UNDYING);
 
     private DungeonLootGenerator() {
     }
 
-    public static void placeAndFillChest(ServerLevel level, BlockPos position, Random random) {
+    public static void placeAndFillChest(
+            ServerLevel level, BlockPos position, Random random,
+            List<DungeonFloorModifier.AppliedModifier> activeModifiers) {
         level.setBlock(position, Blocks.CHEST.defaultBlockState(), UPDATE_FLAGS);
         if (!(level.getBlockEntity(position) instanceof ChestBlockEntity chest)) {
             DungeonCraft.LOGGER.warn("Could not create dungeon loot chest at {}", position);
             return;
         }
 
-        List<ItemStack> loot = createLoot(random);
+        List<ItemStack> loot = createLoot(level, random, activeModifiers);
         List<Integer> slots = new ArrayList<>();
         for (int slot = 0; slot < chest.getContainerSize(); slot++) {
             slots.add(slot);
@@ -46,32 +66,80 @@ public final class DungeonLootGenerator {
         chest.setChanged();
     }
 
-    private static List<ItemStack> createLoot(Random random) {
+    private static List<ItemStack> createLoot(
+            ServerLevel level, Random random,
+            List<DungeonFloorModifier.AppliedModifier> activeModifiers) {
         List<ItemStack> loot = new ArrayList<>();
+        double amountMultiplier = DungeonModifierEffects.lootAmountMultiplier(activeModifiers);
         if (random.nextDouble() < DungeonGenerationConfig.FOOD_CHANCE.get()) {
             loot.add(randomStack(random, FOODS,
-                    DungeonGenerationConfig.FOOD_MIN.getAsInt(), DungeonGenerationConfig.FOOD_MAX.getAsInt()));
+                    DungeonGenerationConfig.FOOD_MIN.getAsInt(), DungeonGenerationConfig.FOOD_MAX.getAsInt(),
+                    amountMultiplier));
         }
         if (random.nextDouble() < DungeonGenerationConfig.ARROW_CHANCE.get()) {
-            loot.add(new ItemStack(Items.ARROW, between(random,
-                    DungeonGenerationConfig.ARROW_MIN.getAsInt(), DungeonGenerationConfig.ARROW_MAX.getAsInt())));
+            loot.add(new ItemStack(Items.ARROW, scaledCount(between(random,
+                    DungeonGenerationConfig.ARROW_MIN.getAsInt(), DungeonGenerationConfig.ARROW_MAX.getAsInt()),
+                    amountMultiplier, Items.ARROW)));
         }
         if (random.nextDouble() < DungeonGenerationConfig.MATERIAL_CHANCE.get()) {
             loot.add(randomStack(random, MATERIALS,
-                    DungeonGenerationConfig.MATERIAL_MIN.getAsInt(), DungeonGenerationConfig.MATERIAL_MAX.getAsInt()));
+                    DungeonGenerationConfig.MATERIAL_MIN.getAsInt(), DungeonGenerationConfig.MATERIAL_MAX.getAsInt(),
+                    amountMultiplier));
         }
         if (random.nextDouble() < DungeonGenerationConfig.EQUIPMENT_CHANCE.get()) {
             loot.add(new ItemStack(EQUIPMENT.get(random.nextInt(EQUIPMENT.size()))));
         }
+        int qualityTier = DungeonModifierEffects.tier(activeModifiers, "loot_quality");
+        if (qualityTier > 0
+                && random.nextDouble() < DungeonModifierEffects.lootQualityChance(activeModifiers)) {
+            List<Item> qualityItems = switch (qualityTier) {
+                case 1 -> QUALITY_T1;
+                case 2 -> QUALITY_T2;
+                default -> QUALITY_T3;
+            };
+            loot.add(new ItemStack(qualityItems.get(random.nextInt(qualityItems.size()))));
+        }
+        int oreTier = DungeonModifierEffects.tier(activeModifiers, "ore_loot");
+        if (oreTier > 0 && random.nextDouble() < DungeonModifierEffects.oreLootChance(activeModifiers)) {
+            List<Item> ores = switch (oreTier) {
+                case 1 -> LOW_ORES;
+                case 2 -> MID_ORES;
+                default -> HIGH_ORES;
+            };
+            loot.add(randomStack(random, ores,
+                    DungeonGenerationConfig.MATERIAL_MIN.getAsInt(), DungeonGenerationConfig.MATERIAL_MAX.getAsInt(),
+                    amountMultiplier));
+        }
+        if (DungeonModifierEffects.tier(activeModifiers, "enchanted_loot") > 0
+                && random.nextDouble() < DungeonModifierEffects.enchantedLootChance(activeModifiers)) {
+            ItemStack book = EnchantmentHelper.enchantItem(
+                    RandomSource.create(random.nextLong()), new ItemStack(Items.BOOK),
+                    DungeonModifierEffects.enchantmentCost(activeModifiers),
+                    level.registryAccess(), java.util.Optional.empty());
+            loot.add(book);
+        }
+        if (DungeonModifierEffects.tier(activeModifiers, "food_loot") > 0
+                && random.nextDouble() < DungeonModifierEffects.foodLootChance(activeModifiers)) {
+            loot.add(randomStack(random, FOODS,
+                    DungeonGenerationConfig.FOOD_MIN.getAsInt(), DungeonGenerationConfig.FOOD_MAX.getAsInt(),
+                    amountMultiplier));
+        }
         if (loot.isEmpty()) {
             loot.add(randomStack(random, FOODS,
-                    DungeonGenerationConfig.FOOD_MIN.getAsInt(), DungeonGenerationConfig.FOOD_MAX.getAsInt()));
+                    DungeonGenerationConfig.FOOD_MIN.getAsInt(), DungeonGenerationConfig.FOOD_MAX.getAsInt(),
+                    amountMultiplier));
         }
         return loot;
     }
 
-    private static ItemStack randomStack(Random random, List<Item> items, int minimum, int maximum) {
-        return new ItemStack(items.get(random.nextInt(items.size())), between(random, minimum, maximum));
+    private static ItemStack randomStack(
+            Random random, List<Item> items, int minimum, int maximum, double multiplier) {
+        Item item = items.get(random.nextInt(items.size()));
+        return new ItemStack(item, scaledCount(between(random, minimum, maximum), multiplier, item));
+    }
+
+    private static int scaledCount(int count, double multiplier, Item item) {
+        return Math.min(item.getDefaultMaxStackSize(), Math.max(1, (int)Math.ceil(count * multiplier)));
     }
 
     private static int between(Random random, int minimum, int maximum) {
