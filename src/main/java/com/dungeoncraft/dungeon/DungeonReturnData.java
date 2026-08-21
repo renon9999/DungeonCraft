@@ -73,6 +73,20 @@ public final class DungeonReturnData extends SavedData {
         return Optional.of(target);
     }
 
+    public Optional<ReturnTarget> takeReturn(UUID playerId) {
+        ReturnTarget target = targets.remove(playerId);
+        if (target != null) {
+            setDirty();
+        }
+        return Optional.ofNullable(target);
+    }
+
+    public void discardReturn(UUID playerId) {
+        if (targets.remove(playerId) != null) {
+            setDirty();
+        }
+    }
+
     private List<ReturnTarget> targets() {
         return List.copyOf(targets.values());
     }

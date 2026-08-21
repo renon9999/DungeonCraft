@@ -2,8 +2,11 @@
   "block.dungeoncraft.dc_portal": "DCポータル",
   "message.dungeoncraft.portal.overworld_only": "DCポータルはオーバーワールドからのみ使用できます。",
   "message.dungeoncraft.portal.dimension_missing": "Dungeon Dimensionを読み込めませんでした。",
-  "message.dungeoncraft.portal.entered": "Dungeon #%sへ移動しました。",
+  "message.dungeoncraft.portal.entered": "Dungeon #%sへ移動しました（Floor 1/%s）",
+  "message.dungeoncraft.floor.entered": "Floor %s/%sへ移動しました。",
   "message.dungeoncraft.returned": "DCポータル前へ帰還しました。",
   "message.dungeoncraft.room.entered": "Room %s に入りました（%s）",
-  "message.dungeoncraft.wave.started": "Room %s：Wave開始（Zombie ×%s）"
+  "message.dungeoncraft.combat.started": "Room %s：戦闘開始（Zombie ×%s）",
+  "message.dungeoncraft.room.cleared": "Room %s Clear！",
+  "message.dungeoncraft.dungeon.completed": "Dungeon Clear！ DCポータル前へ帰還しました。"
 }

@@ -71,7 +71,8 @@ public final class DCPortalBlock extends Block {
         serverPlayer.teleportTo(dungeon, spawn.getX() + 0.5, spawn.getY(), spawn.getZ() + 0.5, Set.of(),
                 serverPlayer.getYRot(), serverPlayer.getXRot(), true);
         serverPlayer.sendOverlayMessage(
-                Component.translatable("message.dungeoncraft.portal.entered", dungeonId));
+                Component.translatable("message.dungeoncraft.portal.entered",
+                        dungeonId, generated.floorCount()));
         return InteractionResult.SUCCESS_SERVER;
     }
 

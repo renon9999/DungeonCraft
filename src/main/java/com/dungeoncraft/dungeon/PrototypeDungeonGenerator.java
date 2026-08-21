@@ -6,6 +6,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Random;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerLevel;
@@ -22,6 +23,7 @@ public final class PrototypeDungeonGenerator {
 
     private static final int REGION_SPACING = 2048;
     private static final int REGIONS_PER_ROW = 10_000;
+    private static final int FLOOR_SLOTS_PER_DUNGEON = 16;
     private static final int CORRIDOR_INTERIOR_HEIGHT = 4;
     private static final int UPDATE_FLAGS = Block.UPDATE_CLIENTS;
 
@@ -31,11 +33,42 @@ public final class PrototypeDungeonGenerator {
     public static GeneratedDungeon generate(ServerLevel level, long dungeonId) {
         GenerationParameters parameters = GenerationParameters.fromConfig();
         Random random = new Random(level.getSeed() ^ dungeonId * 0x9E3779B97F4A7C15L);
-        BlockPos origin = originFor(dungeonId);
+        List<GeneratedFloor> floors = new ArrayList<>();
+        int nextRoomId = 0;
+        for (int floorIndex = 0; floorIndex < parameters.floorCount(); floorIndex++) {
+            GeneratedFloor floor = generateFloor(
+                    level, dungeonId, floorIndex, nextRoomId, parameters, random);
+            floors.add(floor);
+            nextRoomId += floor.rooms().size();
+        }
+
+        List<GeneratedRoom> allRooms = floors.stream().flatMap(floor -> floor.rooms().stream()).toList();
+        List<GeneratedFloorExit> floorExits = new ArrayList<>();
+        for (int floorIndex = 0; floorIndex < floors.size(); floorIndex++) {
+            GeneratedFloor floor = floors.get(floorIndex);
+            Optional<BlockPos> nextSpawn = floorIndex + 1 < floors.size()
+                    ? Optional.of(floors.get(floorIndex + 1).spawn())
+                    : Optional.empty();
+            floorExits.add(new GeneratedFloorExit(
+                    floor.floorNumber(), floor.exitSwitch(), nextSpawn));
+        }
+
+        GeneratedFloor firstFloor = floors.getFirst();
+        DungeonCraft.LOGGER.info("Generated Dungeon #{} with {} floors and {} rooms",
+                dungeonId, floors.size(), allRooms.size());
+        return new GeneratedDungeon(
+                dungeonId, firstFloor.spawn(), firstFloor.returnSwitch(),
+                List.copyOf(floorExits), allRooms);
+    }
+
+    private static GeneratedFloor generateFloor(
+            ServerLevel level, long dungeonId, int floorIndex, int firstRoomId,
+            GenerationParameters parameters, Random random) {
+        BlockPos origin = originFor(dungeonId, floorIndex);
         int targetRooms = between(random, parameters.minRooms(), parameters.maxRooms());
 
         List<Room> rooms = createRoomGraph(random, origin, targetRooms, parameters);
-        assignRoles(random, rooms, parameters.combatRoomChance());
+        assignRoles(random, rooms, parameters.combatRoomChance(), parameters.lootRoomEnabled());
 
         for (Room room : rooms) {
             createRoom(level, room);
@@ -45,28 +78,41 @@ public final class PrototypeDungeonGenerator {
                 createCorridor(level, room.parent(), room, parameters.corridorWidth());
             }
         }
+        for (Room child : rooms) {
+            if (child.parent() != null) {
+                createExitSeal(level, child.parent(), child, parameters.corridorWidth());
+            }
+        }
         for (Room room : rooms) {
             decorateRoom(level, room);
             placeRoleMarker(level, room);
+            if (shouldPlaceLootChest(random, room)) {
+                DungeonLootGenerator.placeAndFillChest(
+                        level, new BlockPos(room.centerX() + 3, PLAYER_Y, room.centerZ()), random);
+            }
         }
 
         Room start = rooms.getFirst();
-        BlockPos returnSwitch = placeReturnSwitch(level, start);
+        Room exit = rooms.stream().filter(room -> room.role == RoomRole.EXIT).findFirst().orElseThrow();
         BlockPos spawn = new BlockPos(start.centerX(), PLAYER_Y, start.centerZ());
-        DungeonCraft.LOGGER.info("Generated Dungeon #{} with {} rooms at {}, {}",
-                dungeonId, rooms.size(), origin.getX(), origin.getZ());
+        BlockPos returnSwitch = floorIndex == 0 ? placeReturnSwitch(level, start) : spawn;
+        BlockPos exitSwitch = placeExitSwitch(level, exit);
+        DungeonCraft.LOGGER.info("Generated Dungeon #{} Floor {} with {} rooms at {}, {}",
+                dungeonId, floorIndex + 1, rooms.size(), origin.getX(), origin.getZ());
         List<GeneratedRoom> generatedRooms = new ArrayList<>();
-        for (int roomId = 0; roomId < rooms.size(); roomId++) {
-            Room room = rooms.get(roomId);
+        for (int localRoomId = 0; localRoomId < rooms.size(); localRoomId++) {
+            Room room = rooms.get(localRoomId);
             generatedRooms.add(new GeneratedRoom(
-                    roomId,
+                    firstRoomId + localRoomId,
                     room.centerX() - room.width() / 2 + 1,
                     room.centerX() + room.width() / 2 - 1,
                     room.centerZ() - room.roomDepth() / 2 + 1,
                     room.centerZ() + room.roomDepth() / 2 - 1,
-                    room.role.name()));
+                    room.role.name(),
+                    List.copyOf(room.exitSealBlocks)));
         }
-        return new GeneratedDungeon(dungeonId, spawn, returnSwitch, List.copyOf(generatedRooms));
+        return new GeneratedFloor(
+                floorIndex + 1, spawn, returnSwitch, exitSwitch, List.copyOf(generatedRooms));
     }
 
     private static List<Room> createRoomGraph(
@@ -123,7 +169,8 @@ public final class PrototypeDungeonGenerator {
         return directions;
     }
 
-    private static void assignRoles(Random random, List<Room> rooms, double combatChance) {
+    private static void assignRoles(
+            Random random, List<Room> rooms, double combatChance, boolean lootRoomEnabled) {
         Room start = rooms.getFirst();
         start.role = RoomRole.START;
         Room exit = rooms.stream().max((left, right) -> Integer.compare(left.depth(), right.depth())).orElseThrow();
@@ -132,7 +179,7 @@ public final class PrototypeDungeonGenerator {
         List<Room> candidates = new ArrayList<>(rooms);
         candidates.remove(start);
         candidates.remove(exit);
-        if (!candidates.isEmpty()) {
+        if (lootRoomEnabled && !candidates.isEmpty()) {
             Room loot = candidates.remove(random.nextInt(candidates.size()));
             loot.role = RoomRole.LOOT;
         }
@@ -238,6 +285,31 @@ public final class PrototypeDungeonGenerator {
         }
     }
 
+    private static void createExitSeal(ServerLevel level, Room parent, Room child, int corridorWidth) {
+        int halfWidth = corridorWidth / 2;
+        List<BlockPos> sealBlocks = parent.exitSealBlocks;
+        if (parent.centerX() != child.centerX()) {
+            int doorX = parent.centerX()
+                    + (child.centerX() > parent.centerX() ? parent.width() / 2 : -parent.width() / 2);
+            for (int z = parent.centerZ() - halfWidth; z <= parent.centerZ() + halfWidth; z++) {
+                addSealColumn(sealBlocks, doorX, z);
+            }
+        } else {
+            int doorZ = parent.centerZ()
+                    + (child.centerZ() > parent.centerZ() ? parent.roomDepth() / 2 : -parent.roomDepth() / 2);
+            for (int x = parent.centerX() - halfWidth; x <= parent.centerX() + halfWidth; x++) {
+                addSealColumn(sealBlocks, x, doorZ);
+            }
+        }
+        DungeonRoomSealer.close(level, sealBlocks);
+    }
+
+    private static void addSealColumn(List<BlockPos> sealBlocks, int x, int z) {
+        for (int y = PLAYER_Y; y <= FLOOR_Y + CORRIDOR_INTERIOR_HEIGHT; y++) {
+            sealBlocks.add(new BlockPos(x, y, z));
+        }
+    }
+
     private static void decorateRoom(ServerLevel level, Room room) {
         switch (room.pattern()) {
             case OPEN -> { }
@@ -298,9 +370,27 @@ public final class PrototypeDungeonGenerator {
         set(level, room.centerX(), FLOOR_Y, room.centerZ(), marker);
     }
 
+    private static boolean shouldPlaceLootChest(Random random, Room room) {
+        return room.role == RoomRole.LOOT
+                || (room.role != RoomRole.START
+                        && room.role != RoomRole.EXIT
+                        && random.nextDouble() < DungeonGenerationConfig.EXTRA_CHEST_CHANCE.get());
+    }
+
     private static BlockPos placeReturnSwitch(ServerLevel level, Room start) {
         BlockPos switchPos = new BlockPos(start.centerX(), PLAYER_Y, start.centerZ() + 2);
         set(level, switchPos.getX(), FLOOR_Y, switchPos.getZ(), Blocks.POLISHED_BLACKSTONE.defaultBlockState());
+        BlockState lever = Blocks.LEVER.defaultBlockState()
+                .setValue(LeverBlock.FACE, AttachFace.FLOOR)
+                .setValue(LeverBlock.FACING, net.minecraft.core.Direction.NORTH)
+                .setValue(LeverBlock.POWERED, false);
+        set(level, switchPos.getX(), switchPos.getY(), switchPos.getZ(), lever);
+        return switchPos;
+    }
+
+    private static BlockPos placeExitSwitch(ServerLevel level, Room exit) {
+        BlockPos switchPos = new BlockPos(exit.centerX(), PLAYER_Y, exit.centerZ() + 2);
+        set(level, switchPos.getX(), FLOOR_Y, switchPos.getZ(), Blocks.IRON_BLOCK.defaultBlockState());
         BlockState lever = Blocks.LEVER.defaultBlockState()
                 .setValue(LeverBlock.FACE, AttachFace.FLOOR)
                 .setValue(LeverBlock.FACING, net.minecraft.core.Direction.NORTH)
@@ -313,8 +403,9 @@ public final class PrototypeDungeonGenerator {
         level.setBlock(new BlockPos(x, y, z), state, UPDATE_FLAGS);
     }
 
-    private static BlockPos originFor(long dungeonId) {
-        long index = Math.max(0L, dungeonId - 1L);
+    private static BlockPos originFor(long dungeonId, int floorIndex) {
+        long dungeonIndex = Math.max(0L, dungeonId - 1L);
+        long index = dungeonIndex * FLOOR_SLOTS_PER_DUNGEON + floorIndex;
         int column = (int)Math.floorMod(index, REGIONS_PER_ROW);
         int row = (int)Math.floorMod(index / REGIONS_PER_ROW, REGIONS_PER_ROW);
         return new BlockPos(column * REGION_SPACING, FLOOR_Y, row * REGION_SPACING);
@@ -335,26 +426,46 @@ public final class PrototypeDungeonGenerator {
     }
 
     public record GeneratedDungeon(
-            long dungeonId, BlockPos spawn, BlockPos returnSwitch, List<GeneratedRoom> rooms) {
+            long dungeonId, BlockPos spawn, BlockPos returnSwitch,
+            List<GeneratedFloorExit> floorExits,
+            List<GeneratedRoom> rooms) {
         public int roomCount() {
             return rooms.size();
         }
+
+        public int floorCount() {
+            return floorExits.size();
+        }
+    }
+
+    public record GeneratedFloorExit(
+            int floorNumber, BlockPos switchPosition, Optional<BlockPos> nextFloorSpawn) {
+        public boolean isFinalFloor() {
+            return nextFloorSpawn.isEmpty();
+        }
+    }
+
+    private record GeneratedFloor(
+            int floorNumber, BlockPos spawn, BlockPos returnSwitch, BlockPos exitSwitch,
+            List<GeneratedRoom> rooms) {
     }
 
     public record GeneratedRoom(
-            int roomId, int minX, int maxX, int minZ, int maxZ, String role) {
+            int roomId, int minX, int maxX, int minZ, int maxZ, String role,
+            List<BlockPos> exitSealBlocks) {
     }
 
     private record GenerationParameters(
-            int minRooms, int maxRooms, int minRoomSize, int maxRoomSize,
+            int minRooms, int maxRooms, int floorCount, int minRoomSize, int maxRoomSize,
             int minRoomHeight, int maxRoomHeight, int cellSpacing,
-            int corridorWidth, double branchChance, double combatRoomChance) {
+            int corridorWidth, double branchChance, double combatRoomChance, boolean lootRoomEnabled) {
         private static GenerationParameters fromConfig() {
             int cellSpacing = DungeonGenerationConfig.CELL_SPACING.getAsInt();
             int maxRoomSize = Math.min(DungeonGenerationConfig.MAX_ROOM_SIZE.getAsInt(), cellSpacing - 5);
             return new GenerationParameters(
                     DungeonGenerationConfig.MIN_ROOMS.getAsInt(),
                     DungeonGenerationConfig.MAX_ROOMS.getAsInt(),
+                    DungeonGenerationConfig.FLOOR_COUNT.getAsInt(),
                     Math.min(DungeonGenerationConfig.MIN_ROOM_SIZE.getAsInt(), maxRoomSize),
                     maxRoomSize,
                     DungeonGenerationConfig.MIN_ROOM_HEIGHT.getAsInt(),
@@ -362,7 +473,8 @@ public final class PrototypeDungeonGenerator {
                     cellSpacing,
                     odd(DungeonGenerationConfig.CORRIDOR_WIDTH.getAsInt()),
                     DungeonGenerationConfig.BRANCH_CHANCE.get(),
-                    DungeonGenerationConfig.COMBAT_ROOM_CHANCE.get());
+                    DungeonGenerationConfig.COMBAT_ROOM_CHANCE.get(),
+                    DungeonGenerationConfig.LOOT_ROOM_ENABLED.get());
         }
 
         private static int odd(int value) {
@@ -380,6 +492,7 @@ public final class PrototypeDungeonGenerator {
         private final RoomPattern pattern;
         private final Room parent;
         private final int depth;
+        private final List<BlockPos> exitSealBlocks = new ArrayList<>();
         private RoomRole role = RoomRole.NORMAL;
 
         private Room(GridPos grid, int centerX, int centerZ, int width, int roomDepth,

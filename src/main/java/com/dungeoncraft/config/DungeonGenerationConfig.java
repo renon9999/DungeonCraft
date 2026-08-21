@@ -7,10 +7,13 @@ public final class DungeonGenerationConfig {
 
     public static final ModConfigSpec.IntValue MIN_ROOMS = BUILDER
             .comment("Minimum number of rooms in a generated prototype dungeon.")
-            .defineInRange("generation.minRooms", 6, 5, 20);
+            .defineInRange("generation.minRooms", 4, 4, 20);
     public static final ModConfigSpec.IntValue MAX_ROOMS = BUILDER
             .comment("Maximum number of rooms in a generated prototype dungeon.")
-            .defineInRange("generation.maxRooms", 10, 5, 20);
+            .defineInRange("generation.maxRooms", 4, 4, 20);
+    public static final ModConfigSpec.IntValue FLOOR_COUNT = BUILDER
+            .comment("Number of floors generated for one dungeon run.")
+            .defineInRange("generation.floorCount", 3, 1, 16);
     public static final ModConfigSpec.IntValue MIN_ROOM_SIZE = BUILDER
             .comment("Minimum room width/depth. Even values are adjusted to an odd value.")
             .defineInRange("generation.minRoomSize", 17, 7, 35);
@@ -33,11 +36,47 @@ public final class DungeonGenerationConfig {
             .comment("Chance to grow from a random frontier room instead of the newest room.")
             .defineInRange("generation.branchChance", 0.4, 0.0, 1.0);
     public static final ModConfigSpec.DoubleValue COMBAT_ROOM_CHANCE = BUILDER
-            .comment("Chance for an ordinary room to be marked as a future combat room.")
-            .defineInRange("generation.combatRoomChance", 0.55, 0.0, 1.0);
-    public static final ModConfigSpec.IntValue FIRST_WAVE_ZOMBIE_COUNT = BUILDER
-            .comment("Number of zombies spawned by the prototype combat-room wave.")
-            .defineInRange("wave.firstWaveZombieCount", 4, 1, 20);
+            .comment("Chance for an ordinary room to become a COMBAT room.")
+            .defineInRange("generation.combatRoomChance", 1.0, 0.0, 1.0);
+    public static final ModConfigSpec.BooleanValue LOOT_ROOM_ENABLED = BUILDER
+            .comment("Whether one dedicated LOOT room is assigned during dungeon generation.")
+            .define("generation.lootRoomEnabled", false);
+    public static final ModConfigSpec.IntValue COMBAT_ENEMY_COUNT = BUILDER
+            .comment("Number of zombies spawned once when entering a COMBAT room.")
+            .defineInRange("combat.enemyCount", 1, 1, 20);
+    public static final ModConfigSpec.DoubleValue EXTRA_CHEST_CHANCE = BUILDER
+            .comment("Chance for a NORMAL or COMBAT room to contain a chest. LOOT rooms always contain one.")
+            .defineInRange("loot.extraChestChance", 0.25, 0.0, 1.0);
+    public static final ModConfigSpec.DoubleValue FOOD_CHANCE = BUILDER
+            .comment("Chance for a generated chest to contain food.")
+            .defineInRange("loot.foodChance", 0.8, 0.0, 1.0);
+    public static final ModConfigSpec.IntValue FOOD_MIN = BUILDER
+            .comment("Minimum food item count.")
+            .defineInRange("loot.foodMin", 2, 1, 64);
+    public static final ModConfigSpec.IntValue FOOD_MAX = BUILDER
+            .comment("Maximum food item count.")
+            .defineInRange("loot.foodMax", 6, 1, 64);
+    public static final ModConfigSpec.DoubleValue ARROW_CHANCE = BUILDER
+            .comment("Chance for a generated chest to contain arrows.")
+            .defineInRange("loot.arrowChance", 0.65, 0.0, 1.0);
+    public static final ModConfigSpec.IntValue ARROW_MIN = BUILDER
+            .comment("Minimum arrow count.")
+            .defineInRange("loot.arrowMin", 4, 1, 64);
+    public static final ModConfigSpec.IntValue ARROW_MAX = BUILDER
+            .comment("Maximum arrow count.")
+            .defineInRange("loot.arrowMax", 16, 1, 64);
+    public static final ModConfigSpec.DoubleValue MATERIAL_CHANCE = BUILDER
+            .comment("Chance for a generated chest to contain a material stack.")
+            .defineInRange("loot.materialChance", 0.65, 0.0, 1.0);
+    public static final ModConfigSpec.IntValue MATERIAL_MIN = BUILDER
+            .comment("Minimum material item count.")
+            .defineInRange("loot.materialMin", 2, 1, 64);
+    public static final ModConfigSpec.IntValue MATERIAL_MAX = BUILDER
+            .comment("Maximum material item count.")
+            .defineInRange("loot.materialMax", 8, 1, 64);
+    public static final ModConfigSpec.DoubleValue EQUIPMENT_CHANCE = BUILDER
+            .comment("Chance for a generated chest to contain one equipment item.")
+            .defineInRange("loot.equipmentChance", 0.25, 0.0, 1.0);
 
     public static final ModConfigSpec SPEC = BUILDER.build();
 

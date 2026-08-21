@@ -2,8 +2,11 @@
   "block.dungeoncraft.dc_portal": "DC Portal",
   "message.dungeoncraft.portal.overworld_only": "The DC Portal can only be used from the Overworld.",
   "message.dungeoncraft.portal.dimension_missing": "The Dungeon Dimension could not be loaded.",
-  "message.dungeoncraft.portal.entered": "Entered Dungeon #%s.",
+  "message.dungeoncraft.portal.entered": "Entered Dungeon #%s (Floor 1/%s).",
+  "message.dungeoncraft.floor.entered": "Entered Floor %s/%s.",
   "message.dungeoncraft.returned": "Returned to the DC Portal.",
   "message.dungeoncraft.room.entered": "Entered Room %s (%s)",
-  "message.dungeoncraft.wave.started": "Room %s: Wave started (Zombie x%s)"
+  "message.dungeoncraft.combat.started": "Room %s: Combat started (Zombie x%s)",
+  "message.dungeoncraft.room.cleared": "Room %s Clear!",
+  "message.dungeoncraft.dungeon.completed": "Dungeon Clear! Returned to the DC Portal."
 }
