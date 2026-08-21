@@ -2,8 +2,12 @@ package com.dungeoncraft;
 
 import com.dungeoncraft.block.DCPortalBlock;
 import com.mojang.logging.LogUtils;
+import net.minecraft.core.registries.Registries;
+import net.minecraft.resources.Identifier;
+import net.minecraft.resources.ResourceKey;
 import net.minecraft.world.item.BlockItem;
 import net.minecraft.world.item.CreativeModeTabs;
+import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.SoundType;
 import net.minecraft.world.level.block.state.BlockBehaviour;
 import net.minecraft.world.level.material.MapColor;
@@ -20,6 +24,9 @@ import org.slf4j.Logger;
 public final class DungeonCraft {
     public static final String MOD_ID = "dungeoncraft";
     public static final Logger LOGGER = LogUtils.getLogger();
+    public static final ResourceKey<Level> DUNGEON_LEVEL = ResourceKey.create(
+            Registries.DIMENSION,
+            Identifier.fromNamespaceAndPath(MOD_ID, "dungeon"));
 
     public static final DeferredRegister.Blocks BLOCKS = DeferredRegister.createBlocks(MOD_ID);
     public static final DeferredRegister.Items ITEMS = DeferredRegister.createItems(MOD_ID);
