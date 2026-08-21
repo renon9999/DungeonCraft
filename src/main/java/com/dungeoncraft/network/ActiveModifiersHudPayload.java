@@ -9,7 +9,8 @@ import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
 import net.minecraft.resources.Identifier;
 
 /** Client-bound snapshot of all modifiers active in the current Dungeon run. */
-public record ActiveModifiersHudPayload(boolean visible, List<ModifierEntry> modifiers)
+public record ActiveModifiersHudPayload(
+        boolean visible, int currentFloor, int floorCount, List<ModifierEntry> modifiers)
         implements CustomPacketPayload {
     private static final int MAX_MODIFIERS = 32;
 
@@ -20,18 +21,22 @@ public record ActiveModifiersHudPayload(boolean visible, List<ModifierEntry> mod
                 @Override
                 public ActiveModifiersHudPayload decode(RegistryFriendlyByteBuf buffer) {
                     boolean visible = buffer.readBoolean();
+                    int currentFloor = buffer.readVarInt();
+                    int floorCount = buffer.readVarInt();
                     int count = Math.min(buffer.readVarInt(), MAX_MODIFIERS);
                     List<ModifierEntry> modifiers = new ArrayList<>(count);
                     for (int index = 0; index < count; index++) {
                         modifiers.add(new ModifierEntry(
                                 buffer.readUtf(64), buffer.readVarInt(), buffer.readBoolean()));
                     }
-                    return new ActiveModifiersHudPayload(visible, modifiers);
+                    return new ActiveModifiersHudPayload(visible, currentFloor, floorCount, modifiers);
                 }
 
                 @Override
                 public void encode(RegistryFriendlyByteBuf buffer, ActiveModifiersHudPayload payload) {
                     buffer.writeBoolean(payload.visible());
+                    buffer.writeVarInt(payload.currentFloor());
+                    buffer.writeVarInt(payload.floorCount());
                     buffer.writeVarInt(payload.modifiers().size());
                     for (ModifierEntry modifier : payload.modifiers()) {
                         buffer.writeUtf(modifier.id(), 64);
@@ -49,7 +54,7 @@ public record ActiveModifiersHudPayload(boolean visible, List<ModifierEntry> mod
     }
 
     public static ActiveModifiersHudPayload hidden() {
-        return new ActiveModifiersHudPayload(false, List.of());
+        return new ActiveModifiersHudPayload(false, 0, 0, List.of());
     }
 
     @Override

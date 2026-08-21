@@ -52,6 +52,8 @@ public final class DungeonActiveModifiersHud {
 
     private static List<HudLine> createLines(ActiveModifiersHudPayload payload) {
         List<HudLine> lines = new ArrayList<>();
+        lines.add(new HudLine(Component.translatable(
+                "hud.dungeoncraft.floor", payload.currentFloor(), payload.floorCount()), 0xFFFFFFFF));
         lines.add(new HudLine(Component.translatable("hud.dungeoncraft.active.title"), 0xFFF5D76E));
         if (payload.modifiers().isEmpty()) {
             lines.add(new HudLine(Component.translatable("hud.dungeoncraft.active.none"), 0xFFB0B0B0));

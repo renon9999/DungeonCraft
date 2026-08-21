@@ -5,43 +5,71 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.entity.EntitySpawnReason;
 import net.minecraft.world.entity.EntityTypes;
-import net.minecraft.world.entity.monster.zombie.Zombie;
+import net.minecraft.world.entity.Mob;
 
-/** Spawns one configurable enemy group when a COMBAT room is entered. */
+/** Spawns the oriented enemy party belonging to a COMBAT Room encounter pattern. */
 public final class DungeonRoomEnemySpawner {
-    private static final List<BlockPos> SPAWN_OFFSETS = List.of(
-            new BlockPos(-3, 0, -3), new BlockPos(3, 0, -3),
-            new BlockPos(-3, 0, 3), new BlockPos(3, 0, 3),
-            new BlockPos(0, 0, -4), new BlockPos(4, 0, 0),
-            new BlockPos(0, 0, 4), new BlockPos(-4, 0, 0));
-
     private DungeonRoomEnemySpawner() {
     }
 
-    public static SpawnedEnemies spawn(ServerLevel level, DungeonProgressData.EnteredRoom room) {
-        int targetCount = DungeonGenerationConfig.COMBAT_ENEMY_COUNT.getAsInt();
-        List<UUID> enemyIds = new ArrayList<>();
-        for (int index = 0; index < targetCount; index++) {
-            BlockPos offset = SPAWN_OFFSETS.get(index % SPAWN_OFFSETS.size());
-            BlockPos spawnPos = new BlockPos(
-                    room.centerX() + offset.getX(),
-                    PrototypeDungeonGenerator.PLAYER_Y,
-                    room.centerZ() + offset.getZ());
-            Zombie zombie = EntityTypes.ZOMBIE.spawn(level, spawnPos, EntitySpawnReason.EVENT);
-            if (zombie != null) {
-                zombie.addTag("dungeoncraft_room_enemy");
-                zombie.addTag("dungeoncraft_dungeon_" + room.dungeonId());
-                zombie.addTag("dungeoncraft_room_" + room.roomId());
-                enemyIds.add(zombie.getUUID());
-            }
+    public static SpawnedEnemies spawn(
+            ServerLevel level, DungeonProgressData.EnteredRoom room,
+            List<DungeonFloorModifier.AppliedModifier> activeModifiers) {
+        DungeonCombatEncounter encounter = DungeonCombatEncounter.byId(room.encounterId());
+        Direction entrance = Direction.byName(room.entranceDirection());
+        if (entrance == null || !entrance.getAxis().isHorizontal()) {
+            entrance = Direction.NORTH;
         }
-        return new SpawnedEnemies(List.copyOf(enemyIds));
+        int basePartySize = encounter.enemies().size()
+                * DungeonGenerationConfig.COMBAT_ENEMY_COUNT.getAsInt();
+        int targetPartySize = Math.max(1, (int)Math.round(
+                basePartySize * DungeonModifierEffects.enemyCountMultiplier(activeModifiers)));
+        ArrayList<UUID> enemyIds = new ArrayList<>();
+        for (int index = 0; index < targetPartySize; index++) {
+            DungeonCombatEncounter.EnemySlot slot =
+                    encounter.enemies().get(index % encounter.enemies().size());
+            int copy = index / encounter.enemies().size();
+            int sideSpread = copy == 0 ? 0 : (copy % 2 == 0 ? 1 : -1) * ((copy + 1) / 2);
+            BlockPos spawnPos = DungeonCombatEncounter.position(
+                    room.centerX(), room.centerZ(), entrance,
+                    slot.side() + sideSpread, slot.depth(), slot.yOffset());
+            Mob enemy = spawnEnemy(level, spawnPos, slot.kind());
+            if (enemy == null) {
+                continue;
+            }
+            DungeonEnemyModifierApplier.apply(level, enemy, slot.kind(), activeModifiers);
+            enemy.addTag("dungeoncraft_room_enemy");
+            enemy.addTag("dungeoncraft_dungeon_" + room.dungeonId());
+            enemy.addTag("dungeoncraft_room_" + room.roomId());
+            enemyIds.add(enemy.getUUID());
+        }
+        return new SpawnedEnemies(java.util.List.copyOf(enemyIds), encounter.id());
     }
 
-    public record SpawnedEnemies(List<UUID> enemyIds) {
+    private static Mob spawnEnemy(
+            ServerLevel level, BlockPos position, DungeonCombatEncounter.EnemyKind kind) {
+        return switch (kind) {
+            case ZOMBIE -> EntityTypes.ZOMBIE.spawn(level, position, EntitySpawnReason.EVENT);
+            case SKELETON -> EntityTypes.SKELETON.spawn(level, position, EntitySpawnReason.EVENT);
+            case SPIDER -> EntityTypes.SPIDER.spawn(level, position, EntitySpawnReason.EVENT);
+            case PILLAGER -> EntityTypes.PILLAGER.spawn(level, position, EntitySpawnReason.EVENT);
+            case VINDICATOR -> EntityTypes.VINDICATOR.spawn(level, position, EntitySpawnReason.EVENT);
+            case EVOKER -> EntityTypes.EVOKER.spawn(level, position, EntitySpawnReason.EVENT);
+            case RAVAGER -> EntityTypes.RAVAGER.spawn(level, position, EntitySpawnReason.EVENT);
+            case WITHER_SKELETON -> EntityTypes.WITHER_SKELETON.spawn(
+                    level, position, EntitySpawnReason.EVENT);
+            case BLAZE -> EntityTypes.BLAZE.spawn(level, position, EntitySpawnReason.EVENT);
+            case ENDERMAN -> EntityTypes.ENDERMAN.spawn(level, position, EntitySpawnReason.EVENT);
+            case ENDERMITE -> EntityTypes.ENDERMITE.spawn(level, position, EntitySpawnReason.EVENT);
+            case SHULKER -> EntityTypes.SHULKER.spawn(level, position, EntitySpawnReason.EVENT);
+        };
+    }
+
+    public record SpawnedEnemies(java.util.List<UUID> enemyIds, String encounterId) {
         public int enemyCount() {
             return enemyIds.size();
         }

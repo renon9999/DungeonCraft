@@ -3,7 +3,7 @@ package com.dungeoncraft.network;
 import net.neoforged.neoforge.network.event.RegisterPayloadHandlersEvent;
 
 public final class DungeonNetwork {
-    private static final String NETWORK_VERSION = "1";
+    private static final String NETWORK_VERSION = "2";
 
     private DungeonNetwork() {
     }

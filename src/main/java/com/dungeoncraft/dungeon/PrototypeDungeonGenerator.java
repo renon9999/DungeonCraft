@@ -32,6 +32,10 @@ public final class PrototypeDungeonGenerator {
             new BlockPos(3, 0, -3), new BlockPos(-3, 0, -3),
             new BlockPos(6, 0, 0), new BlockPos(-6, 0, 0),
             new BlockPos(0, 0, 6));
+    private static final List<BlockPos> EXIT_REWARD_CHEST_OFFSETS = List.of(
+            new BlockPos(0, 0, -4),
+            new BlockPos(-3, 0, -4), new BlockPos(3, 0, -4),
+            new BlockPos(-6, 0, -4), new BlockPos(6, 0, -4));
 
     private PrototypeDungeonGenerator() {
     }
@@ -72,7 +76,10 @@ public final class PrototypeDungeonGenerator {
         int targetRooms = between(random, parameters.minRooms(), parameters.maxRooms());
 
         List<Room> rooms = createRoomGraph(random, origin, targetRooms, parameters);
-        assignRoles(random, rooms, parameters.combatRoomChance(), parameters.lootRoomEnabled());
+        assignRoles(random, rooms, parameters.combatRoomChance(), parameters.lootRoomEnabled(),
+                floorNumber % 3 == 0,
+                DungeonModifierEffects.maximumEnemyStrength(activeModifiers),
+                DungeonModifierEffects.tier(activeModifiers, "enemy_strength"));
 
         for (Room room : rooms) {
             createRoom(level, room);
@@ -90,6 +97,24 @@ public final class PrototypeDungeonGenerator {
         for (Room room : rooms) {
             decorateRoom(level, room);
             placeRoleMarker(level, room);
+            if (room.role == RoomRole.REST) {
+                placeRestFacilities(level, room);
+            }
+            if (room.role == RoomRole.EXIT) {
+                List<DungeonFloorModifier.AppliedModifier> exitRewardModifiers =
+                        DungeonModifierEffects.boostedLootModifiers(activeModifiers, 1);
+                int exitChestCount = 1 + Math.min(
+                        EXIT_REWARD_CHEST_OFFSETS.size() - 1,
+                        DungeonModifierEffects.extraChestCount(exitRewardModifiers));
+                for (int chestIndex = 0; chestIndex < exitChestCount; chestIndex++) {
+                    BlockPos offset = EXIT_REWARD_CHEST_OFFSETS.get(chestIndex);
+                    DungeonLootGenerator.placeAndFillChest(
+                            level, new BlockPos(
+                                    room.centerX() + offset.getX(), PLAYER_Y,
+                                    room.centerZ() + offset.getZ()),
+                            random, exitRewardModifiers);
+                }
+            }
             int chestCount = lootChestCount(random, room, activeModifiers);
             for (int chestIndex = 0; chestIndex < chestCount; chestIndex++) {
                 BlockPos offset = LOOT_CHEST_OFFSETS.get(chestIndex);
@@ -104,7 +129,6 @@ public final class PrototypeDungeonGenerator {
         Room start = rooms.getFirst();
         Room exit = rooms.stream().filter(room -> room.role == RoomRole.EXIT).findFirst().orElseThrow();
         BlockPos spawn = new BlockPos(start.centerX(), PLAYER_Y, start.centerZ());
-        BlockPos returnSwitch = floorIndex == 0 ? placeReturnSwitch(level, start) : spawn;
         List<GeneratedFloorExit> floorExits = placeFloorExitSwitches(
                 level, exit, dungeonId, floorNumber, finalFloor);
         DungeonCraft.LOGGER.info("Generated Dungeon #{} Floor {} with {} rooms at {}, {}",
@@ -119,10 +143,12 @@ public final class PrototypeDungeonGenerator {
                     room.centerZ() - room.roomDepth() / 2 + 1,
                     room.centerZ() + room.roomDepth() / 2 - 1,
                     room.role.name(),
+                    room.combatEncounter() == null ? "" : room.combatEncounter().id(),
+                    room.entranceDirection().getName(),
                     List.copyOf(room.exitSealBlocks)));
         }
         return new GeneratedFloor(
-                floorNumber, spawn, returnSwitch, floorExits, List.copyOf(generatedRooms));
+                floorNumber, spawn, spawn, floorExits, List.copyOf(generatedRooms));
     }
 
     private static List<Room> createRoomGraph(
@@ -180,7 +206,8 @@ public final class PrototypeDungeonGenerator {
     }
 
     private static void assignRoles(
-            Random random, List<Room> rooms, double combatChance, boolean lootRoomEnabled) {
+            Random random, List<Room> rooms, double combatChance, boolean lootRoomEnabled,
+            boolean restRoomRequired, int maximumEnemyStrength, int enemyStrengthTier) {
         Room start = rooms.getFirst();
         start.role = RoomRole.START;
         Room exit = rooms.stream().max((left, right) -> Integer.compare(left.depth(), right.depth())).orElseThrow();
@@ -189,12 +216,20 @@ public final class PrototypeDungeonGenerator {
         List<Room> candidates = new ArrayList<>(rooms);
         candidates.remove(start);
         candidates.remove(exit);
+        if (restRoomRequired && !candidates.isEmpty()) {
+            Room rest = candidates.remove(random.nextInt(candidates.size()));
+            rest.role = RoomRole.REST;
+        }
         if (lootRoomEnabled && !candidates.isEmpty()) {
             Room loot = candidates.remove(random.nextInt(candidates.size()));
             loot.role = RoomRole.LOOT;
         }
         for (Room room : candidates) {
             room.role = random.nextDouble() < combatChance ? RoomRole.COMBAT : RoomRole.NORMAL;
+            if (room.role == RoomRole.COMBAT) {
+                room.applyEncounter(DungeonCombatEncounter.choose(
+                        random, maximumEnemyStrength, enemyStrengthTier));
+            }
         }
     }
 
@@ -218,13 +253,23 @@ public final class PrototypeDungeonGenerator {
     }
 
     private static void addCeilingLights(ServerLevel level, Room room, int ceilingY) {
-        int lightX = Math.max(2, room.width() / 2 - 2);
-        int lightZ = Math.max(2, room.roomDepth() / 2 - 2);
-        set(level, room.centerX(), ceilingY, room.centerZ(), Blocks.SEA_LANTERN.defaultBlockState());
-        set(level, room.centerX() - lightX, ceilingY, room.centerZ() - lightZ, Blocks.SEA_LANTERN.defaultBlockState());
-        set(level, room.centerX() - lightX, ceilingY, room.centerZ() + lightZ, Blocks.SEA_LANTERN.defaultBlockState());
-        set(level, room.centerX() + lightX, ceilingY, room.centerZ() - lightZ, Blocks.SEA_LANTERN.defaultBlockState());
-        set(level, room.centerX() + lightX, ceilingY, room.centerZ() + lightZ, Blocks.SEA_LANTERN.defaultBlockState());
+        int usableHalfWidth = Math.max(0, room.width() / 2 - 3);
+        int usableHalfDepth = Math.max(0, room.roomDepth() / 2 - 3);
+        for (int xOffset : centeredLightOffsets(usableHalfWidth)) {
+            for (int zOffset : centeredLightOffsets(usableHalfDepth)) {
+                set(level, room.centerX() + xOffset, ceilingY, room.centerZ() + zOffset,
+                        Blocks.SEA_LANTERN.defaultBlockState());
+            }
+        }
+    }
+
+    private static List<Integer> centeredLightOffsets(int usableHalfSize) {
+        int rings = Math.max(0, usableHalfSize / 6);
+        List<Integer> offsets = new ArrayList<>();
+        for (int index = -rings; index <= rings; index++) {
+            offsets.add(index * 6);
+        }
+        return offsets;
     }
 
     private static void createCorridor(ServerLevel level, Room first, Room second, int corridorWidth) {
@@ -321,6 +366,11 @@ public final class PrototypeDungeonGenerator {
     }
 
     private static void decorateRoom(ServerLevel level, Room room) {
+        if (room.combatEncounter() != null) {
+            room.combatEncounter().decorate(
+                    level, room.centerX(), room.centerZ(), room.entranceDirection());
+            return;
+        }
         switch (room.pattern()) {
             case OPEN -> { }
             case PILLARS -> addPillars(level, room);
@@ -375,6 +425,7 @@ public final class PrototypeDungeonGenerator {
             case NORMAL -> Blocks.STONE_BRICKS.defaultBlockState();
             case COMBAT -> Blocks.REDSTONE_BLOCK.defaultBlockState();
             case LOOT -> Blocks.GOLD_BLOCK.defaultBlockState();
+            case REST -> Blocks.LAPIS_BLOCK.defaultBlockState();
             case EXIT -> Blocks.LODESTONE.defaultBlockState();
         };
         set(level, room.centerX(), FLOOR_Y, room.centerZ(), marker);
@@ -395,15 +446,27 @@ public final class PrototypeDungeonGenerator {
         return 0;
     }
 
-    private static BlockPos placeReturnSwitch(ServerLevel level, Room start) {
-        BlockPos switchPos = new BlockPos(start.centerX(), PLAYER_Y, start.centerZ() + 2);
-        set(level, switchPos.getX(), FLOOR_Y, switchPos.getZ(), Blocks.POLISHED_BLACKSTONE.defaultBlockState());
-        BlockState lever = Blocks.LEVER.defaultBlockState()
-                .setValue(LeverBlock.FACE, AttachFace.FLOOR)
-                .setValue(LeverBlock.FACING, net.minecraft.core.Direction.NORTH)
-                .setValue(LeverBlock.POWERED, false);
-        set(level, switchPos.getX(), switchPos.getY(), switchPos.getZ(), lever);
-        return switchPos;
+    private static void placeRestFacilities(ServerLevel level, Room room) {
+        BlockPos table = new BlockPos(room.centerX(), PLAYER_Y, room.centerZ());
+        set(level, table.getX(), table.getY(), table.getZ(), Blocks.ENCHANTING_TABLE.defaultBlockState());
+        set(level, room.centerX() - 4, PLAYER_Y, room.centerZ(), Blocks.ANVIL.defaultBlockState());
+        DungeonLootGenerator.placeEnchantingSupplyChest(
+                level, new BlockPos(room.centerX() + 4, PLAYER_Y, room.centerZ()));
+
+        int placedBookshelves = 0;
+        for (int xOffset = -2; xOffset <= 2 && placedBookshelves < 15; xOffset++) {
+            for (int zOffset = -2; zOffset <= 2 && placedBookshelves < 15; zOffset++) {
+                if (Math.abs(xOffset) != 2 && Math.abs(zOffset) != 2) {
+                    continue;
+                }
+                if (xOffset == 0 && zOffset == -2) {
+                    continue;
+                }
+                set(level, room.centerX() + xOffset, PLAYER_Y, room.centerZ() + zOffset,
+                        Blocks.BOOKSHELF.defaultBlockState());
+                placedBookshelves++;
+            }
+        }
     }
 
     private static List<GeneratedFloorExit> placeFloorExitSwitches(
@@ -493,6 +556,7 @@ public final class PrototypeDungeonGenerator {
 
     public record GeneratedRoom(
             int roomId, int minX, int maxX, int minZ, int maxZ, String role,
+            String encounterId, String entranceDirection,
             List<BlockPos> exitSealBlocks) {
     }
 
@@ -527,14 +591,15 @@ public final class PrototypeDungeonGenerator {
         private final GridPos grid;
         private final int centerX;
         private final int centerZ;
-        private final int width;
-        private final int roomDepth;
-        private final int height;
+        private int width;
+        private int roomDepth;
+        private int height;
         private final RoomPattern pattern;
         private final Room parent;
         private final int depth;
         private final List<BlockPos> exitSealBlocks = new ArrayList<>();
         private RoomRole role = RoomRole.NORMAL;
+        private DungeonCombatEncounter combatEncounter;
 
         private Room(GridPos grid, int centerX, int centerZ, int width, int roomDepth,
                      int height, RoomPattern pattern, Room parent, int depth) {
@@ -558,6 +623,29 @@ public final class PrototypeDungeonGenerator {
         private RoomPattern pattern() { return pattern; }
         private Room parent() { return parent; }
         private int depth() { return depth; }
+        private DungeonCombatEncounter combatEncounter() { return combatEncounter; }
+
+        private void applyEncounter(DungeonCombatEncounter encounter) {
+            combatEncounter = encounter;
+            width = encounter.width();
+            roomDepth = encounter.depth();
+            height = encounter.height();
+        }
+
+        private net.minecraft.core.Direction entranceDirection() {
+            if (parent == null) {
+                return net.minecraft.core.Direction.NORTH;
+            }
+            if (parent.centerX < centerX) {
+                return net.minecraft.core.Direction.WEST;
+            }
+            if (parent.centerX > centerX) {
+                return net.minecraft.core.Direction.EAST;
+            }
+            return parent.centerZ < centerZ
+                    ? net.minecraft.core.Direction.NORTH
+                    : net.minecraft.core.Direction.SOUTH;
+        }
     }
 
     private record GridPos(int x, int z) {
@@ -583,6 +671,6 @@ public final class PrototypeDungeonGenerator {
     }
 
     private enum RoomRole {
-        START, NORMAL, COMBAT, LOOT, EXIT
+        START, NORMAL, COMBAT, LOOT, REST, EXIT
     }
 }

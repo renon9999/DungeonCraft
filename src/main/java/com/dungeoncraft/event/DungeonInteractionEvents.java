@@ -12,7 +12,9 @@ import com.dungeoncraft.network.FloorChoiceHudPayload;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
+import java.util.UUID;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.level.portal.TeleportTransition;
@@ -22,6 +24,7 @@ import net.minecraft.resources.Identifier;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.server.MinecraftServer;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.InteractionResult;
 import net.minecraft.world.level.Level;
@@ -39,7 +42,13 @@ public final class DungeonInteractionEvents {
     private static final double CHOICE_HUD_SHOW_DISTANCE_SQUARED = 16.0;
     private static final double CHOICE_HUD_HIDE_DISTANCE_SQUARED = 25.0;
     private static final Map<java.util.UUID, ChoiceHudKey> VISIBLE_CHOICES = new HashMap<>();
-    private static final Map<java.util.UUID, List<ActiveModifierKey>> ACTIVE_MODIFIER_STATES = new HashMap<>();
+    private static final Map<java.util.UUID, ActiveHudKey> ACTIVE_MODIFIER_STATES = new HashMap<>();
+    private static final List<BlockPos> PARTY_SPAWN_OFFSETS = List.of(
+            BlockPos.ZERO,
+            new BlockPos(1, 0, 0), new BlockPos(-1, 0, 0),
+            new BlockPos(0, 0, 1), new BlockPos(0, 0, -1),
+            new BlockPos(1, 0, 1), new BlockPos(-1, 0, 1),
+            new BlockPos(1, 0, -1), new BlockPos(-1, 0, -1));
 
     private DungeonInteractionEvents() {
     }
@@ -52,18 +61,21 @@ public final class DungeonInteractionEvents {
         }
 
         DungeonProgressData progress = DungeonProgressData.get(player.level().getServer());
+        if (player.tickCount % 20 == 0) {
+            player.causeFoodExhaustion((float)DungeonModifierEffects.hungerExhaustionPerSecond(
+                    progress.activeModifiers(player.getUUID())));
+        }
         updateChoiceHud(player, progress);
         updateActiveModifierHud(player, progress);
         progress.enterRoom(player.getUUID(), player.blockPosition())
                 .ifPresent(room -> {
                     if (room.isCombat()) {
                         DungeonRoomEnemySpawner.SpawnedEnemies enemies =
-                                DungeonRoomEnemySpawner.spawn((ServerLevel)player.level(), room);
+                                DungeonRoomEnemySpawner.spawn(
+                                        (ServerLevel)player.level(), room,
+                                        progress.activeModifiers(player.getUUID()));
                         DungeonProgressData.get(player.level().getServer())
                                 .startRoomCombat(player.getUUID(), room.roomId(), enemies.enemyIds());
-                        player.sendOverlayMessage(Component.translatable(
-                                "message.dungeoncraft.combat.started",
-                                room.roomId() + 1, enemies.enemyCount()));
                         if (enemies.enemyCount() == 0) {
                             DungeonRoomSealer.open((ServerLevel)player.level(),
                                     DungeonProgressData.get(player.level().getServer())
@@ -71,8 +83,6 @@ public final class DungeonInteractionEvents {
                         }
                     } else {
                         DungeonRoomSealer.open((ServerLevel)player.level(), room.exitSealBlocks());
-                        player.sendOverlayMessage(Component.translatable(
-                                "message.dungeoncraft.room.entered", room.roomId() + 1, room.role()));
                     }
                 });
     }
@@ -81,19 +91,29 @@ public final class DungeonInteractionEvents {
         if (player.tickCount % 5 != 0) {
             return;
         }
-        List<ActiveModifierKey> next = progress.activeModifiers(player.getUUID()).stream()
+        List<ActiveModifierKey> modifiers = progress.activeModifiers(player.getUUID()).stream()
                 .map(modifier -> new ActiveModifierKey(
                         modifier.id(), modifier.tier(), modifier.positive()))
                 .toList();
+        var floorProgress = progress.floorProgress(player.getUUID());
+        if (floorProgress.isEmpty()) {
+            if (ACTIVE_MODIFIER_STATES.remove(player.getUUID()) != null) {
+                PacketDistributor.sendToPlayer(player, ActiveModifiersHudPayload.hidden());
+            }
+            return;
+        }
+        DungeonProgressData.FloorProgress floor = floorProgress.orElseThrow();
+        ActiveHudKey next = new ActiveHudKey(floor.currentFloor(), floor.floorCount(), modifiers);
         if (next.equals(ACTIVE_MODIFIER_STATES.get(player.getUUID()))) {
             return;
         }
         ACTIVE_MODIFIER_STATES.put(player.getUUID(), next);
-        var payloadModifiers = next.stream()
+        var payloadModifiers = modifiers.stream()
                 .map(modifier -> new ActiveModifiersHudPayload.ModifierEntry(
                         modifier.id(), modifier.tier(), modifier.positive()))
                 .toList();
-        PacketDistributor.sendToPlayer(player, new ActiveModifiersHudPayload(true, payloadModifiers));
+        PacketDistributor.sendToPlayer(player, new ActiveModifiersHudPayload(
+                true, floor.currentFloor(), floor.floorCount(), payloadModifiers));
     }
 
     private static void updateChoiceHud(ServerPlayer player, DungeonProgressData progress) {
@@ -131,11 +151,7 @@ public final class DungeonInteractionEvents {
     public static void onLivingDeath(LivingDeathEvent event) {
         if (event.getEntity() instanceof ServerPlayer player
                 && player.level().dimension() == DungeonCraft.DUNGEON_LEVEL) {
-            DungeonProgressData.get(player.level().getServer()).endRun(player.getUUID());
-            VISIBLE_CHOICES.remove(player.getUUID());
-            ACTIVE_MODIFIER_STATES.remove(player.getUUID());
-            PacketDistributor.sendToPlayer(player, ActiveModifiersHudPayload.hidden());
-            DungeonReturnData.get(player.level().getServer()).discardReturn(player.getUUID());
+            failParty(player, false);
             return;
         }
         handleRoomEnemyRemoved(event.getEntity());
@@ -170,19 +186,17 @@ public final class DungeonInteractionEvents {
             return;
         }
 
-        DungeonProgressData.get(player.level().getServer()).endRun(player.getUUID());
-        VISIBLE_CHOICES.remove(player.getUUID());
-        ACTIVE_MODIFIER_STATES.remove(player.getUUID());
-        DungeonReturnData.get(player.level().getServer()).discardReturn(player.getUUID());
-        TeleportTransition respawn = player.findRespawnPositionAndUseSpawnBlock(
-                false, TeleportTransition.DO_NOTHING);
-        player.teleport(respawn);
+        failParty(player, true);
     }
 
     private record ChoiceHudKey(int floorNumber, int choiceIndex) {
     }
 
     private record ActiveModifierKey(String id, int tier, boolean positive) {
+    }
+
+    private record ActiveHudKey(
+            int currentFloor, int floorCount, List<ActiveModifierKey> modifiers) {
     }
 
     private static void handleRoomEnemyRemoved(Entity entity) {
@@ -231,12 +245,11 @@ public final class DungeonInteractionEvents {
                 return;
             }
             BlockPos nextSpawn = nextFloor.spawn();
-            player.teleportTo(dungeonLevel,
-                    nextSpawn.getX() + 0.5, nextSpawn.getY(), nextSpawn.getZ() + 0.5,
-                    Set.of(), player.getYRot(), player.getXRot(), true);
-            player.sendOverlayMessage(Component.translatable(
-                    "message.dungeoncraft.floor.choice_entered",
-                    action.choiceIndex() + 1, action.floorNumber() + 1, action.floorCount()));
+            teleportPartyToFloor(
+                    player, progress.partyMemberIds(player.getUUID()), dungeonLevel, nextSpawn,
+                    Component.translatable(
+                            "message.dungeoncraft.floor.choice_entered",
+                            action.choiceIndex() + 1, action.floorNumber() + 1, action.floorCount()));
             event.setCanceled(true);
             event.setCancellationResult(InteractionResult.SUCCESS_SERVER);
             return;
@@ -244,31 +257,113 @@ public final class DungeonInteractionEvents {
 
         boolean dungeonExit = floorExit.isPresent();
         DungeonReturnData data = DungeonReturnData.get(player.level().getServer());
-        var returnTarget = dungeonExit
-                ? data.takeReturn(player.getUUID())
-                : data.takeReturn(player.getUUID(), event.getPos());
-        if (returnTarget.isEmpty()) {
+        if (!dungeonExit && !data.matchesReturnSwitch(player.getUUID(), event.getPos())) {
             return;
         }
 
-        DungeonReturnData.ReturnTarget target = returnTarget.orElseThrow();
-        ResourceKey<Level> returnKey = ResourceKey.create(
-                Registries.DIMENSION, Identifier.parse(target.dimension()));
-        ServerLevel returnLevel = player.level().getServer().getLevel(returnKey);
-        if (returnLevel == null) {
-            returnLevel = player.level().getServer().overworld();
-        }
-        progress.endRun(player.getUUID());
-        VISIBLE_CHOICES.remove(player.getUUID());
-        ACTIVE_MODIFIER_STATES.remove(player.getUUID());
-        PacketDistributor.sendToPlayer(player, ActiveModifiersHudPayload.hidden());
-        player.teleportTo(returnLevel, target.x(), target.y(), target.z(), Set.of(),
-                player.getYRot(), player.getXRot(), true);
-        player.sendOverlayMessage(Component.translatable(dungeonExit
-                ? "message.dungeoncraft.dungeon.completed"
-                : "message.dungeoncraft.returned"));
+        returnParty(player, progress, data, dungeonExit);
 
         event.setCanceled(true);
         event.setCancellationResult(InteractionResult.SUCCESS_SERVER);
+    }
+
+    private static void teleportPartyToFloor(
+            ServerPlayer activatingPlayer, List<UUID> memberIds,
+            ServerLevel dungeonLevel, BlockPos spawn, Component message) {
+        MinecraftServer server = activatingPlayer.level().getServer();
+        for (int index = 0; index < memberIds.size(); index++) {
+            UUID memberId = memberIds.get(index);
+            ServerPlayer member = server.getPlayerList().getPlayer(memberId);
+            if (member == null) {
+                continue;
+            }
+            clearClientHud(member);
+            BlockPos offset = PARTY_SPAWN_OFFSETS.get(Math.min(index, PARTY_SPAWN_OFFSETS.size() - 1));
+            member.teleportTo(
+                    dungeonLevel,
+                    spawn.getX() + offset.getX() + 0.5,
+                    spawn.getY(),
+                    spawn.getZ() + offset.getZ() + 0.5,
+                    Set.of(), member.getYRot(), member.getXRot(), true);
+            member.sendOverlayMessage(message);
+        }
+    }
+
+    private static void returnParty(
+            ServerPlayer activatingPlayer, DungeonProgressData progress,
+            DungeonReturnData returnData, boolean completed) {
+        MinecraftServer server = activatingPlayer.level().getServer();
+        List<UUID> memberIds = progress.partyMemberIds(activatingPlayer.getUUID());
+        if (memberIds.isEmpty()) {
+            return;
+        }
+        Map<UUID, Optional<DungeonReturnData.ReturnTarget>> targets = new HashMap<>();
+        memberIds.forEach(memberId -> targets.put(memberId, returnData.takeReturn(memberId)));
+        progress.endRun(activatingPlayer.getUUID());
+        for (UUID memberId : memberIds) {
+            ServerPlayer member = server.getPlayerList().getPlayer(memberId);
+            if (member == null) {
+                continue;
+            }
+            clearClientHud(member);
+            Optional<DungeonReturnData.ReturnTarget> returnTarget = targets.get(memberId);
+            if (returnTarget != null && returnTarget.isPresent()) {
+                teleportToReturn(server, member, returnTarget.orElseThrow());
+            } else {
+                teleportToRespawn(member);
+            }
+            member.sendOverlayMessage(Component.translatable(completed
+                    ? "message.dungeoncraft.dungeon.completed"
+                    : "message.dungeoncraft.returned"));
+        }
+    }
+
+    private static void failParty(ServerPlayer triggeringPlayer, boolean teleportTriggeringPlayer) {
+        MinecraftServer server = triggeringPlayer.level().getServer();
+        DungeonProgressData progress = DungeonProgressData.get(server);
+        List<UUID> memberIds = progress.partyMemberIds(triggeringPlayer.getUUID());
+        if (memberIds.isEmpty()) {
+            return;
+        }
+        progress.endRun(triggeringPlayer.getUUID());
+        DungeonReturnData returnData = DungeonReturnData.get(server);
+        for (UUID memberId : memberIds) {
+            returnData.discardReturn(memberId);
+            ServerPlayer member = server.getPlayerList().getPlayer(memberId);
+            if (member == null) {
+                VISIBLE_CHOICES.remove(memberId);
+                ACTIVE_MODIFIER_STATES.remove(memberId);
+                continue;
+            }
+            clearClientHud(member);
+            if (teleportTriggeringPlayer || !memberId.equals(triggeringPlayer.getUUID())) {
+                teleportToRespawn(member);
+            }
+        }
+    }
+
+    private static void teleportToReturn(
+            MinecraftServer server, ServerPlayer player, DungeonReturnData.ReturnTarget target) {
+        ResourceKey<Level> returnKey = ResourceKey.create(
+                Registries.DIMENSION, Identifier.parse(target.dimension()));
+        ServerLevel returnLevel = server.getLevel(returnKey);
+        if (returnLevel == null) {
+            returnLevel = server.overworld();
+        }
+        player.teleportTo(returnLevel, target.x(), target.y(), target.z(), Set.of(),
+                player.getYRot(), player.getXRot(), true);
+    }
+
+    private static void teleportToRespawn(ServerPlayer player) {
+        TeleportTransition respawn = player.findRespawnPositionAndUseSpawnBlock(
+                false, TeleportTransition.DO_NOTHING);
+        player.teleport(respawn);
+    }
+
+    private static void clearClientHud(ServerPlayer player) {
+        VISIBLE_CHOICES.remove(player.getUUID());
+        ACTIVE_MODIFIER_STATES.remove(player.getUUID());
+        PacketDistributor.sendToPlayer(player, FloorChoiceHudPayload.hidden());
+        PacketDistributor.sendToPlayer(player, ActiveModifiersHudPayload.hidden());
     }
 }

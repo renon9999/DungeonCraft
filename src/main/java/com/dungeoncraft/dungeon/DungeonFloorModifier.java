@@ -45,18 +45,16 @@ public final class DungeonFloorModifier {
         Map<String, Integer> negativeUsage = new HashMap<>();
         for (int choiceIndex = 0; choiceIndex < 3; choiceIndex++) {
             int maxTier = DungeonGenerationConfig.MAX_MODIFIER_TIER.getAsInt();
+            int score = choiceIndex + 1;
             CountPair counts = chooseCompatibleCounts(
                     random,
                     DungeonGenerationConfig.MIN_POSITIVE_MODIFIERS.getAsInt(),
                     DungeonGenerationConfig.MAX_POSITIVE_MODIFIERS.getAsInt(),
                     DungeonGenerationConfig.MIN_NEGATIVE_MODIFIERS.getAsInt(),
                     DungeonGenerationConfig.MAX_NEGATIVE_MODIFIERS.getAsInt(),
-                    maxTier);
+                    maxTier, score);
             int positiveCount = counts.positiveCount();
             int negativeCount = counts.negativeCount();
-            int minimumScore = Math.max(positiveCount, negativeCount);
-            int maximumScore = Math.min(positiveCount * maxTier, negativeCount * maxTier);
-            int score = between(random, minimumScore, maximumScore);
             List<Integer> positiveTiers = distributeScore(random, positiveCount, score, maxTier);
             List<Integer> negativeTiers = distributeScore(random, negativeCount, score, maxTier);
             List<AppliedModifier> modifiers = new ArrayList<>();
@@ -70,7 +68,7 @@ public final class DungeonFloorModifier {
     private static CountPair chooseCompatibleCounts(
             Random random,
             int positiveMinimum, int positiveMaximum,
-            int negativeMinimum, int negativeMaximum, int maxTier) {
+            int negativeMinimum, int negativeMaximum, int maxTier, int score) {
         List<CountPair> compatible = new ArrayList<>();
         int positiveLower = Math.min(positiveMinimum, positiveMaximum);
         int positiveUpper = Math.max(positiveMinimum, positiveMaximum);
@@ -80,14 +78,16 @@ public final class DungeonFloorModifier {
             for (int negativeCount = negativeLower; negativeCount <= negativeUpper; negativeCount++) {
                 int minimumScore = Math.max(positiveCount, negativeCount);
                 int maximumScore = Math.min(positiveCount * maxTier, negativeCount * maxTier);
-                if (minimumScore <= maximumScore) {
+                if (score >= minimumScore && score <= maximumScore) {
                     compatible.add(new CountPair(positiveCount, negativeCount));
                 }
             }
         }
-        return compatible.isEmpty()
-                ? new CountPair(1, 1)
-                : compatible.get(random.nextInt(compatible.size()));
+        if (compatible.isEmpty()) {
+            int fallbackCount = Math.max(1, (score + maxTier - 1) / maxTier);
+            return new CountPair(fallbackCount, fallbackCount);
+        }
+        return compatible.get(random.nextInt(compatible.size()));
     }
 
     private static List<AppliedModifier> pickDiverse(

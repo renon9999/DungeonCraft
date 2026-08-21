@@ -1,10 +1,13 @@
 package com.dungeoncraft.block;
 
 import com.dungeoncraft.DungeonCraft;
+import com.dungeoncraft.config.DungeonGenerationConfig;
 import com.dungeoncraft.dungeon.DungeonSequenceData;
 import com.dungeoncraft.dungeon.DungeonProgressData;
 import com.dungeoncraft.dungeon.DungeonReturnData;
 import com.dungeoncraft.dungeon.PrototypeDungeonGenerator;
+import java.util.Comparator;
+import java.util.List;
 import java.util.Set;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.particles.ParticleTypes;
@@ -28,6 +31,12 @@ import net.minecraft.world.phys.shapes.VoxelShape;
 
 public final class DCPortalBlock extends Block {
     private static final VoxelShape SHAPE = Block.column(16.0, 0.0, 7.0);
+    private static final List<BlockPos> PARTY_SPAWN_OFFSETS = List.of(
+            BlockPos.ZERO,
+            new BlockPos(1, 0, 0), new BlockPos(-1, 0, 0),
+            new BlockPos(0, 0, 1), new BlockPos(0, 0, -1),
+            new BlockPos(1, 0, 1), new BlockPos(-1, 0, 1),
+            new BlockPos(1, 0, -1), new BlockPos(-1, 0, -1));
 
     public DCPortalBlock(BlockBehaviour.Properties properties) {
         super(properties);
@@ -61,18 +70,43 @@ public final class DCPortalBlock extends Block {
             return InteractionResult.SUCCESS_SERVER;
         }
 
+        DungeonProgressData progress = DungeonProgressData.get(serverPlayer.level().getServer());
+        double joinRadius = DungeonGenerationConfig.PARTY_JOIN_RADIUS.get();
+        double joinRadiusSquared = joinRadius * joinRadius;
+        double portalX = pos.getX() + 0.5;
+        double portalY = pos.getY() + 0.5;
+        double portalZ = pos.getZ() + 0.5;
+        List<ServerPlayer> party = ((ServerLevel)level).players().stream()
+                .filter(candidate -> candidate == serverPlayer
+                        || (candidate.isAlive() && !progress.hasActiveRun(candidate.getUUID())))
+                .filter(candidate -> candidate.distanceToSqr(portalX, portalY, portalZ) <= joinRadiusSquared)
+                .sorted(Comparator
+                        .comparingInt((ServerPlayer candidate) -> candidate == serverPlayer ? 0 : 1)
+                        .thenComparingDouble(candidate -> candidate.distanceToSqr(portalX, portalY, portalZ))
+                        .thenComparing(candidate -> candidate.getUUID().toString()))
+                .limit(DungeonGenerationConfig.MAX_PARTY_SIZE.getAsInt())
+                .toList();
+
         long dungeonId = DungeonSequenceData.get(serverPlayer.level().getServer()).allocateDungeonId();
         PrototypeDungeonGenerator.GeneratedDungeon generated =
                 PrototypeDungeonGenerator.generate(dungeon, dungeonId);
-        DungeonReturnData.get(serverPlayer.level().getServer())
-                .recordReturn(serverPlayer, generated.returnSwitch());
-        DungeonProgressData.get(serverPlayer.level().getServer()).startRun(serverPlayer, generated);
+        DungeonReturnData returnData = DungeonReturnData.get(serverPlayer.level().getServer());
+        party.forEach(member -> returnData.recordReturn(member, generated.returnSwitch()));
+        progress.startRun(serverPlayer, party, generated);
         BlockPos spawn = generated.spawn();
-        serverPlayer.teleportTo(dungeon, spawn.getX() + 0.5, spawn.getY(), spawn.getZ() + 0.5, Set.of(),
-                serverPlayer.getYRot(), serverPlayer.getXRot(), true);
-        serverPlayer.sendOverlayMessage(
-                Component.translatable("message.dungeoncraft.portal.entered",
-                        dungeonId, generated.floorCount()));
+        for (int index = 0; index < party.size(); index++) {
+            ServerPlayer member = party.get(index);
+            BlockPos offset = PARTY_SPAWN_OFFSETS.get(index);
+            member.teleportTo(
+                    dungeon,
+                    spawn.getX() + offset.getX() + 0.5,
+                    spawn.getY(),
+                    spawn.getZ() + offset.getZ() + 0.5,
+                    Set.of(), member.getYRot(), member.getXRot(), true);
+            member.sendOverlayMessage(
+                    Component.translatable("message.dungeoncraft.portal.entered",
+                            dungeonId, generated.floorCount()));
+        }
         return InteractionResult.SUCCESS_SERVER;
     }
 

@@ -73,6 +73,11 @@ public final class DungeonReturnData extends SavedData {
         return Optional.of(target);
     }
 
+    public boolean matchesReturnSwitch(UUID playerId, BlockPos usedSwitch) {
+        ReturnTarget target = targets.get(playerId);
+        return target != null && target.switchPos().equals(usedSwitch);
+    }
+
     public Optional<ReturnTarget> takeReturn(UUID playerId) {
         ReturnTarget target = targets.remove(playerId);
         if (target != null) {
