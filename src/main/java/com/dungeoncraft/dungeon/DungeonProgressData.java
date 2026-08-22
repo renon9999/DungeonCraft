@@ -9,6 +9,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.OptionalLong;
 import java.util.UUID;
 import net.minecraft.core.BlockPos;
 import net.minecraft.resources.Identifier;
@@ -233,6 +234,32 @@ public final class DungeonProgressData extends SavedData {
         return runFor(playerId) != null;
     }
 
+    public OptionalLong activeDungeonId(UUID playerId) {
+        Long dungeonId = playerRuns.get(playerId);
+        return dungeonId == null ? OptionalLong.empty() : OptionalLong.of(dungeonId);
+    }
+
+    /** Removes only the departing member; the shared run survives while at least one member remains. */
+    public Optional<PartyDeparture> removePartyMember(UUID playerId) {
+        Long dungeonId = playerRuns.remove(playerId);
+        if (dungeonId == null) {
+            return Optional.empty();
+        }
+        RunState run = runs.get(dungeonId);
+        if (run == null) {
+            setDirty();
+            return Optional.of(new PartyDeparture(dungeonId, List.of(), true));
+        }
+        run.memberIds().remove(playerId);
+        boolean abandoned = run.memberIds().isEmpty();
+        List<UUID> remaining = List.copyOf(run.memberIds());
+        if (abandoned) {
+            runs.remove(dungeonId);
+        }
+        setDirty();
+        return Optional.of(new PartyDeparture(dungeonId, remaining, abandoned));
+    }
+
     public List<DungeonFloorModifier.AppliedModifier> modifiersAfterSelection(
             UUID playerId, List<DungeonFloorModifier.AppliedModifier> selectedModifiers) {
         List<DungeonFloorModifier.AppliedModifier> combined = new ArrayList<>(activeModifiers(playerId));
@@ -255,6 +282,8 @@ public final class DungeonProgressData extends SavedData {
         for (DungeonFloorModifier.AppliedModifier modifier : selectedModifiers) {
             addModifierTier(run.persistentModifiers(), modifier);
         }
+        run.rooms().removeIf(room -> room.floorNumber() <= expectedCurrentFloor);
+        run.floorExits().removeIf(exit -> exit.floorNumber() <= expectedCurrentFloor);
         run.rooms().addAll(createRoomStates(floor.floorNumber(), floor.rooms()));
         floor.floorExits().stream()
                 .map(exit -> new FloorExitState(
@@ -355,6 +384,7 @@ public final class DungeonProgressData extends SavedData {
                         run.dungeonId(), room.roomId(), room.role(),
                         room.encounterId(), room.entranceDirection(),
                         room.centerX(), room.centerZ(),
+                        room.minX(), room.maxX(), room.minZ(), room.maxZ(),
                         room.exitSealBlocks()));
             }
         }
@@ -543,6 +573,7 @@ public final class DungeonProgressData extends SavedData {
             long dungeonId, int roomId, String role,
             String encounterId, String entranceDirection,
             int centerX, int centerZ,
+            int minX, int maxX, int minZ, int maxZ,
             List<BlockPos> exitSealBlocks) {
         public boolean isCombat() {
             return "COMBAT".equals(role);
@@ -567,6 +598,10 @@ public final class DungeonProgressData extends SavedData {
     }
 
     public record FloorProgress(int currentFloor, int floorCount) {
+    }
+
+    public record PartyDeparture(
+            long dungeonId, List<UUID> remainingMemberIds, boolean abandoned) {
     }
 
     public record NearbyFloorChoice(

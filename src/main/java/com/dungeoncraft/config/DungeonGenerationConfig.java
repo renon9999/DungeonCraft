@@ -12,8 +12,8 @@ public final class DungeonGenerationConfig {
             .comment("Maximum number of rooms in a generated prototype dungeon.")
             .defineInRange("generation.maxRooms", 8, 3, 20);
     public static final ModConfigSpec.IntValue FLOOR_COUNT = BUILDER
-            .comment("Number of floors generated for one dungeon run.")
-            .defineInRange("generation.floorCount", 6, 1, 16);
+            .comment("Legacy/default floor count. Portal UI selections can create up to 40 floors.")
+            .defineInRange("generation.floorCount", 6, 1, 40);
     public static final ModConfigSpec.IntValue MIN_ROOM_SIZE = BUILDER
             .comment("Minimum room width/depth. Even values are adjusted to an odd value.")
             .defineInRange("generation.minRoomSize", 17, 7, 35);
@@ -128,10 +128,21 @@ public final class DungeonGenerationConfig {
     public static final ModConfigSpec.DoubleValue LOOT_AMOUNT_T2 = multiplier("lootAmountT2", 1.2);
     public static final ModConfigSpec.DoubleValue LOOT_AMOUNT_T3 = multiplier("lootAmountT3", 1.4);
     public static final ModConfigSpec.DoubleValue LOOT_AMOUNT_T5 = multiplier("lootAmountT5", 1.75);
+    public static final ModConfigSpec.DoubleValue LOOT_SLOTS_T1 = multiplier("lootSlotsT1", 1.5);
+    public static final ModConfigSpec.DoubleValue LOOT_SLOTS_T2 = multiplier("lootSlotsT2", 2.0);
+    public static final ModConfigSpec.DoubleValue LOOT_SLOTS_T3 = multiplier("lootSlotsT3", 3.0);
+    public static final ModConfigSpec.DoubleValue LOOT_SLOTS_T5 = multiplier("lootSlotsT5", 5.0);
     public static final ModConfigSpec.DoubleValue LOOT_QUALITY_T1 = chance("lootQualityChanceT1", 0.15);
     public static final ModConfigSpec.DoubleValue LOOT_QUALITY_T2 = chance("lootQualityChanceT2", 0.25);
     public static final ModConfigSpec.DoubleValue LOOT_QUALITY_T3 = chance("lootQualityChanceT3", 0.4);
     public static final ModConfigSpec.DoubleValue LOOT_QUALITY_T5 = chance("lootQualityChanceT5", 0.65);
+    public static final ModConfigSpec.DoubleValue RARE_LOOT_T4 = chance("rareLootChanceT4", 0.0025);
+    public static final ModConfigSpec.DoubleValue RARE_LOOT_T5 = chance("rareLootChanceT5", 0.005);
+    public static final ModConfigSpec.DoubleValue STRONG_BOOK_T1 = chance("strongBookChanceT1", 0.005);
+    public static final ModConfigSpec.DoubleValue STRONG_BOOK_T2 = chance("strongBookChanceT2", 0.0075);
+    public static final ModConfigSpec.DoubleValue STRONG_BOOK_T3 = chance("strongBookChanceT3", 0.01);
+    public static final ModConfigSpec.DoubleValue STRONG_BOOK_T4 = chance("strongBookChanceT4", 0.015);
+    public static final ModConfigSpec.DoubleValue STRONG_BOOK_T5 = chance("strongBookChanceT5", 0.02);
     public static final ModConfigSpec.DoubleValue ORE_LOOT_T1 = chance("oreLootChanceT1", 0.2);
     public static final ModConfigSpec.DoubleValue ORE_LOOT_T2 = chance("oreLootChanceT2", 0.3);
     public static final ModConfigSpec.DoubleValue ORE_LOOT_T3 = chance("oreLootChanceT3", 0.45);
@@ -166,7 +177,7 @@ public final class DungeonGenerationConfig {
             .defineInRange("loot.foodMax", 6, 1, 64);
     public static final ModConfigSpec.DoubleValue ARROW_CHANCE = BUILDER
             .comment("Chance for a generated chest to contain arrows.")
-            .defineInRange("loot.arrowChance", 0.65, 0.0, 1.0);
+            .defineInRange("loot.arrowChance", 0.2, 0.0, 1.0);
     public static final ModConfigSpec.IntValue ARROW_MIN = BUILDER
             .comment("Minimum arrow count.")
             .defineInRange("loot.arrowMin", 4, 1, 64);
@@ -175,7 +186,7 @@ public final class DungeonGenerationConfig {
             .defineInRange("loot.arrowMax", 16, 1, 64);
     public static final ModConfigSpec.DoubleValue MATERIAL_CHANCE = BUILDER
             .comment("Chance for a generated chest to contain a material stack.")
-            .defineInRange("loot.materialChance", 0.65, 0.0, 1.0);
+            .defineInRange("loot.materialChance", 0.45, 0.0, 1.0);
     public static final ModConfigSpec.IntValue MATERIAL_MIN = BUILDER
             .comment("Minimum material item count.")
             .defineInRange("loot.materialMin", 2, 1, 64);

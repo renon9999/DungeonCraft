@@ -3,6 +3,7 @@ package com.dungeoncraft.event;
 import com.dungeoncraft.DungeonCraft;
 import com.dungeoncraft.dungeon.DungeonReturnData;
 import com.dungeoncraft.dungeon.DungeonProgressData;
+import com.dungeoncraft.dungeon.DungeonCleanupManager;
 import com.dungeoncraft.dungeon.DungeonModifierEffects;
 import com.dungeoncraft.dungeon.DungeonRoomEnemySpawner;
 import com.dungeoncraft.dungeon.DungeonRoomSealer;
@@ -35,7 +36,9 @@ import net.neoforged.neoforge.event.entity.player.PlayerEvent;
 import net.neoforged.neoforge.event.entity.EntityLeaveLevelEvent;
 import net.neoforged.neoforge.event.entity.living.LivingDeathEvent;
 import net.neoforged.neoforge.event.entity.living.LivingExperienceDropEvent;
+import net.neoforged.neoforge.event.level.BlockEvent;
 import net.neoforged.neoforge.event.tick.PlayerTickEvent;
+import net.neoforged.neoforge.event.tick.ServerTickEvent;
 import net.neoforged.neoforge.network.PacketDistributor;
 
 public final class DungeonInteractionEvents {
@@ -51,6 +54,14 @@ public final class DungeonInteractionEvents {
             new BlockPos(1, 0, -1), new BlockPos(-1, 0, -1));
 
     private DungeonInteractionEvents() {
+    }
+
+    @SubscribeEvent
+    public static void onBlockPlaced(BlockEvent.EntityPlaceEvent event) {
+        if (event.getEntity() instanceof ServerPlayer player
+                && player.level().dimension() == DungeonCraft.DUNGEON_LEVEL) {
+            event.setCanceled(true);
+        }
     }
 
     @SubscribeEvent
@@ -151,7 +162,7 @@ public final class DungeonInteractionEvents {
     public static void onLivingDeath(LivingDeathEvent event) {
         if (event.getEntity() instanceof ServerPlayer player
                 && player.level().dimension() == DungeonCraft.DUNGEON_LEVEL) {
-            failParty(player, false);
+            eliminatePartyMember(player, false);
             return;
         }
         handleRoomEnemyRemoved(event.getEntity());
@@ -186,7 +197,12 @@ public final class DungeonInteractionEvents {
             return;
         }
 
-        failParty(player, true);
+        eliminatePartyMember(player, true);
+    }
+
+    @SubscribeEvent
+    public static void onServerTick(ServerTickEvent.Post event) {
+        DungeonCleanupManager.tick(event.getServer());
     }
 
     private record ChoiceHudKey(int floorNumber, int choiceIndex) {
@@ -232,13 +248,25 @@ public final class DungeonInteractionEvents {
         if (floorExit.isPresent() && !floorExit.orElseThrow().isFinalFloor()) {
             DungeonProgressData.FloorExitAction action = floorExit.orElseThrow();
             ServerLevel dungeonLevel = (ServerLevel)player.level();
+            int nextFloorNumber = action.floorNumber() + 1;
+            if (!DungeonCleanupManager.isFloorSlotReady(action.dungeonId(), nextFloorNumber)) {
+                player.sendOverlayMessage(Component.translatable(
+                        "message.dungeoncraft.floor.cleanup_pending"));
+                event.setCanceled(true);
+                event.setCancellationResult(InteractionResult.SUCCESS_SERVER);
+                return;
+            }
+            long instanceSlot = DungeonCleanupManager.instanceSlot(action.dungeonId());
+            if (instanceSlot < 0L) {
+                return;
+            }
             var nextModifiers = progress.modifiersAfterSelection(
                     player.getUUID(), action.modifiers());
             PrototypeDungeonGenerator.GeneratedFloor nextFloor =
                     PrototypeDungeonGenerator.generateNextFloor(
-                            dungeonLevel, action.dungeonId(),
-                            action.floorNumber() + 1, action.nextRoomId(),
-                            action.choiceIndex(), action.floorNumber() + 1 >= action.floorCount(),
+                            dungeonLevel, action.dungeonId(), instanceSlot,
+                            nextFloorNumber, action.nextRoomId(),
+                            action.choiceIndex(), nextFloorNumber >= action.floorCount(),
                             nextModifiers);
             if (!progress.advanceToFloor(
                     player.getUUID(), action.floorNumber(), nextFloor, action.modifiers())) {
@@ -250,6 +278,9 @@ public final class DungeonInteractionEvents {
                     Component.translatable(
                             "message.dungeoncraft.floor.choice_entered",
                             action.choiceIndex() + 1, action.floorNumber() + 1, action.floorCount()));
+            DungeonCleanupManager.transitionToFloor(
+                    action.dungeonId(), nextFloorNumber,
+                    nextFloor.cleanupRegions());
             event.setCanceled(true);
             event.setCancellationResult(InteractionResult.SUCCESS_SERVER);
             return;
@@ -299,6 +330,7 @@ public final class DungeonInteractionEvents {
         }
         Map<UUID, Optional<DungeonReturnData.ReturnTarget>> targets = new HashMap<>();
         memberIds.forEach(memberId -> targets.put(memberId, returnData.takeReturn(memberId)));
+        long dungeonId = progress.activeDungeonId(activatingPlayer.getUUID()).orElse(-1L);
         progress.endRun(activatingPlayer.getUUID());
         for (UUID memberId : memberIds) {
             ServerPlayer member = server.getPlayerList().getPlayer(memberId);
@@ -316,28 +348,39 @@ public final class DungeonInteractionEvents {
                     ? "message.dungeoncraft.dungeon.completed"
                     : "message.dungeoncraft.returned"));
         }
+        ServerLevel dungeonLevel = server.getLevel(DungeonCraft.DUNGEON_LEVEL);
+        if (dungeonLevel != null && dungeonId >= 0L) {
+            DungeonCleanupManager.retireDungeon(dungeonId);
+        }
     }
 
-    private static void failParty(ServerPlayer triggeringPlayer, boolean teleportTriggeringPlayer) {
-        MinecraftServer server = triggeringPlayer.level().getServer();
+    private static void eliminatePartyMember(
+            ServerPlayer eliminatedPlayer, boolean teleportToSpawn) {
+        MinecraftServer server = eliminatedPlayer.level().getServer();
         DungeonProgressData progress = DungeonProgressData.get(server);
-        List<UUID> memberIds = progress.partyMemberIds(triggeringPlayer.getUUID());
-        if (memberIds.isEmpty()) {
+        var departure = progress.removePartyMember(eliminatedPlayer.getUUID());
+        if (departure.isEmpty()) {
             return;
         }
-        progress.endRun(triggeringPlayer.getUUID());
         DungeonReturnData returnData = DungeonReturnData.get(server);
-        for (UUID memberId : memberIds) {
-            returnData.discardReturn(memberId);
+        returnData.discardReturn(eliminatedPlayer.getUUID());
+        clearClientHud(eliminatedPlayer);
+        if (teleportToSpawn) {
+            teleportToRespawn(eliminatedPlayer);
+        }
+        DungeonProgressData.PartyDeparture result = departure.orElseThrow();
+        for (UUID memberId : result.remainingMemberIds()) {
             ServerPlayer member = server.getPlayerList().getPlayer(memberId);
-            if (member == null) {
-                VISIBLE_CHOICES.remove(memberId);
-                ACTIVE_MODIFIER_STATES.remove(memberId);
-                continue;
+            if (member != null) {
+                member.sendOverlayMessage(Component.translatable(
+                        "message.dungeoncraft.party.member_eliminated",
+                        eliminatedPlayer.getScoreboardName()));
             }
-            clearClientHud(member);
-            if (teleportTriggeringPlayer || !memberId.equals(triggeringPlayer.getUUID())) {
-                teleportToRespawn(member);
+        }
+        if (result.abandoned()) {
+            ServerLevel dungeonLevel = server.getLevel(DungeonCraft.DUNGEON_LEVEL);
+            if (dungeonLevel != null) {
+                DungeonCleanupManager.retireDungeon(result.dungeonId());
             }
         }
     }

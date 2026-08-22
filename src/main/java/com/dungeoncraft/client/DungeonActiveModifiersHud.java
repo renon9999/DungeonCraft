@@ -16,6 +16,7 @@ public final class DungeonActiveModifiersHud {
     private static final int PADDING = 6;
     private static final int LINE_HEIGHT = 10;
     private static ActiveModifiersHudPayload current = ActiveModifiersHudPayload.hidden();
+    private static boolean userVisible = true;
 
     private DungeonActiveModifiersHud() {
     }
@@ -24,9 +25,14 @@ public final class DungeonActiveModifiersHud {
         current = payload;
     }
 
+    public static void toggleVisibility() {
+        userVisible = !userVisible;
+    }
+
     public static void render(GuiGraphicsExtractor graphics, net.minecraft.client.DeltaTracker ignored) {
         Minecraft minecraft = Minecraft.getInstance();
-        if (!current.visible()
+        if (!userVisible
+                || !current.visible()
                 || minecraft.player == null
                 || minecraft.level == null
                 || minecraft.level.dimension() != DungeonCraft.DUNGEON_LEVEL) {

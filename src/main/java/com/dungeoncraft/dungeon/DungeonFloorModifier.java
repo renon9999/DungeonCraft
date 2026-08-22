@@ -12,6 +12,7 @@ import java.util.Random;
 
 /** Definitions and deterministic generation for Floor Choice modifiers. */
 public final class DungeonFloorModifier {
+    private static final int CHOICE_SCORE = 2;
     public static final Codec<AppliedModifier> APPLIED_CODEC = RecordCodecBuilder.create(instance -> instance.group(
             Codec.STRING.fieldOf("id").forGetter(AppliedModifier::id),
             Codec.INT.fieldOf("tier").forGetter(AppliedModifier::tier),
@@ -45,7 +46,7 @@ public final class DungeonFloorModifier {
         Map<String, Integer> negativeUsage = new HashMap<>();
         for (int choiceIndex = 0; choiceIndex < 3; choiceIndex++) {
             int maxTier = DungeonGenerationConfig.MAX_MODIFIER_TIER.getAsInt();
-            int score = choiceIndex + 1;
+            int score = CHOICE_SCORE;
             CountPair counts = chooseCompatibleCounts(
                     random,
                     DungeonGenerationConfig.MIN_POSITIVE_MODIFIERS.getAsInt(),
@@ -124,12 +125,6 @@ public final class DungeonFloorModifier {
         }
         Collections.shuffle(tiers, random);
         return List.copyOf(tiers);
-    }
-
-    private static int between(Random random, int minimum, int maximum) {
-        int lower = Math.min(minimum, maximum);
-        int upper = Math.max(minimum, maximum);
-        return lower + random.nextInt(upper - lower + 1);
     }
 
     private record Definition(String id, boolean positive, boolean persistent) {

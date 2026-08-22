@@ -5,7 +5,9 @@ import com.dungeoncraft.config.DungeonGenerationConfig;
 import com.dungeoncraft.dungeon.DungeonSequenceData;
 import com.dungeoncraft.dungeon.DungeonProgressData;
 import com.dungeoncraft.dungeon.DungeonReturnData;
+import com.dungeoncraft.dungeon.DungeonCleanupManager;
 import com.dungeoncraft.dungeon.PrototypeDungeonGenerator;
+import com.dungeoncraft.network.OpenFloorSelectionPayload;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Set;
@@ -28,8 +30,11 @@ import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.shapes.CollisionContext;
 import net.minecraft.world.phys.shapes.VoxelShape;
+import net.neoforged.neoforge.network.PacketDistributor;
 
 public final class DCPortalBlock extends Block {
+    private static final Set<Integer> ALLOWED_FLOOR_COUNTS = Set.of(6, 10, 20, 40);
+    private static final double SELECTION_DISTANCE_SQUARED = 64.0;
     private static final VoxelShape SHAPE = Block.column(16.0, 0.0, 7.0);
     private static final List<BlockPos> PARTY_SPAWN_OFFSETS = List.of(
             BlockPos.ZERO,
@@ -62,21 +67,42 @@ public final class DCPortalBlock extends Block {
             return InteractionResult.SUCCESS_SERVER;
         }
 
+        PacketDistributor.sendToPlayer(serverPlayer, new OpenFloorSelectionPayload(pos));
+        return InteractionResult.SUCCESS_SERVER;
+    }
+
+    public static void startSelectedDungeon(
+            ServerPlayer serverPlayer, BlockPos portalPos, int floorCount) {
+        if (!ALLOWED_FLOOR_COUNTS.contains(floorCount)
+                || serverPlayer.level().dimension() != Level.OVERWORLD
+                || serverPlayer.distanceToSqr(
+                        portalPos.getX() + 0.5, portalPos.getY() + 0.5, portalPos.getZ() + 0.5)
+                        > SELECTION_DISTANCE_SQUARED
+                || !serverPlayer.level().getBlockState(portalPos).is(DungeonCraft.DC_PORTAL.get())) {
+            serverPlayer.sendOverlayMessage(
+                    Component.translatable("message.dungeoncraft.portal.selection_invalid"));
+            return;
+        }
         ServerLevel dungeon = serverPlayer.level().getServer().getLevel(DungeonCraft.DUNGEON_LEVEL);
         if (dungeon == null) {
             DungeonCraft.LOGGER.error("Dungeon dimension {} is not available", DungeonCraft.DUNGEON_LEVEL.identifier());
             serverPlayer.sendOverlayMessage(
                     Component.translatable("message.dungeoncraft.portal.dimension_missing"));
-            return InteractionResult.SUCCESS_SERVER;
+            return;
         }
 
         DungeonProgressData progress = DungeonProgressData.get(serverPlayer.level().getServer());
+        if (progress.hasActiveRun(serverPlayer.getUUID())) {
+            serverPlayer.sendOverlayMessage(
+                    Component.translatable("message.dungeoncraft.portal.already_active"));
+            return;
+        }
         double joinRadius = DungeonGenerationConfig.PARTY_JOIN_RADIUS.get();
         double joinRadiusSquared = joinRadius * joinRadius;
-        double portalX = pos.getX() + 0.5;
-        double portalY = pos.getY() + 0.5;
-        double portalZ = pos.getZ() + 0.5;
-        List<ServerPlayer> party = ((ServerLevel)level).players().stream()
+        double portalX = portalPos.getX() + 0.5;
+        double portalY = portalPos.getY() + 0.5;
+        double portalZ = portalPos.getZ() + 0.5;
+        List<ServerPlayer> party = ((ServerLevel)serverPlayer.level()).players().stream()
                 .filter(candidate -> candidate == serverPlayer
                         || (candidate.isAlive() && !progress.hasActiveRun(candidate.getUUID())))
                 .filter(candidate -> candidate.distanceToSqr(portalX, portalY, portalZ) <= joinRadiusSquared)
@@ -88,8 +114,11 @@ public final class DCPortalBlock extends Block {
                 .toList();
 
         long dungeonId = DungeonSequenceData.get(serverPlayer.level().getServer()).allocateDungeonId();
+        long instanceSlot = DungeonCleanupManager.allocateInstance(dungeonId);
         PrototypeDungeonGenerator.GeneratedDungeon generated =
-                PrototypeDungeonGenerator.generate(dungeon, dungeonId);
+                PrototypeDungeonGenerator.generate(dungeon, dungeonId, instanceSlot, floorCount);
+        DungeonCleanupManager.registerInitialFloor(
+                dungeonId, 1, generated.cleanupRegions());
         DungeonReturnData returnData = DungeonReturnData.get(serverPlayer.level().getServer());
         party.forEach(member -> returnData.recordReturn(member, generated.returnSwitch()));
         progress.startRun(serverPlayer, party, generated);
@@ -107,7 +136,6 @@ public final class DCPortalBlock extends Block {
                     Component.translatable("message.dungeoncraft.portal.entered",
                             dungeonId, generated.floorCount()));
         }
-        return InteractionResult.SUCCESS_SERVER;
     }
 
     @Override

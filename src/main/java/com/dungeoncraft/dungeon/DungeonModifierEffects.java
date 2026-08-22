@@ -37,12 +37,39 @@ public final class DungeonModifierEffects {
                 DungeonGenerationConfig.LOOT_AMOUNT_T5.get());
     }
 
+    public static double lootSlotMultiplier(List<DungeonFloorModifier.AppliedModifier> modifiers) {
+        return doubleByTier(tier(modifiers, "loot_amount"), 1.0,
+                DungeonGenerationConfig.LOOT_SLOTS_T1.get(),
+                DungeonGenerationConfig.LOOT_SLOTS_T2.get(),
+                DungeonGenerationConfig.LOOT_SLOTS_T3.get(),
+                DungeonGenerationConfig.LOOT_SLOTS_T5.get());
+    }
+
     public static double lootQualityChance(List<DungeonFloorModifier.AppliedModifier> modifiers) {
         return doubleByTier(tier(modifiers, "loot_quality"), 0.0,
                 DungeonGenerationConfig.LOOT_QUALITY_T1.get(),
                 DungeonGenerationConfig.LOOT_QUALITY_T2.get(),
                 DungeonGenerationConfig.LOOT_QUALITY_T3.get(),
                 DungeonGenerationConfig.LOOT_QUALITY_T5.get());
+    }
+
+    public static double rareLootChance(List<DungeonFloorModifier.AppliedModifier> modifiers) {
+        return switch (tier(modifiers, "loot_quality")) {
+            case 4 -> DungeonGenerationConfig.RARE_LOOT_T4.get();
+            case 5 -> DungeonGenerationConfig.RARE_LOOT_T5.get();
+            default -> 0.0;
+        };
+    }
+
+    public static double strongBookChance(List<DungeonFloorModifier.AppliedModifier> modifiers) {
+        return switch (tier(modifiers, "loot_quality")) {
+            case 1 -> DungeonGenerationConfig.STRONG_BOOK_T1.get();
+            case 2 -> DungeonGenerationConfig.STRONG_BOOK_T2.get();
+            case 3 -> DungeonGenerationConfig.STRONG_BOOK_T3.get();
+            case 4 -> DungeonGenerationConfig.STRONG_BOOK_T4.get();
+            case 5 -> DungeonGenerationConfig.STRONG_BOOK_T5.get();
+            default -> 0.0;
+        };
     }
 
     public static double oreLootChance(List<DungeonFloorModifier.AppliedModifier> modifiers) {

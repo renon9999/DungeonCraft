@@ -11,6 +11,7 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.LanternBlock;
 import net.minecraft.world.level.block.LeverBlock;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.state.properties.AttachFace;
@@ -20,9 +21,9 @@ public final class PrototypeDungeonGenerator {
     public static final int FLOOR_Y = 65;
     public static final int PLAYER_Y = FLOOR_Y + 1;
 
-    private static final int REGION_SPACING = 2048;
+    private static final int REGION_SPACING = 2560;
     private static final int REGIONS_PER_ROW = 10_000;
-    private static final int FLOOR_SLOTS_PER_DUNGEON = 16;
+    private static final int FLOOR_SLOTS_PER_INSTANCE = 3;
     private static final int CORRIDOR_INTERIOR_HEIGHT = 4;
     private static final int UPDATE_FLAGS = Block.UPDATE_CLIENTS;
     private static final List<BlockPos> LOOT_CHEST_OFFSETS = List.of(
@@ -41,29 +42,38 @@ public final class PrototypeDungeonGenerator {
     }
 
     public static GeneratedDungeon generate(ServerLevel level, long dungeonId) {
+        return generate(level, dungeonId, dungeonId - 1L,
+                DungeonGenerationConfig.FLOOR_COUNT.getAsInt());
+    }
+
+    public static GeneratedDungeon generate(
+            ServerLevel level, long dungeonId, long instanceSlot, int requestedFloorCount) {
         GenerationParameters parameters = GenerationParameters.fromConfig();
+        int floorCount = Math.max(1, Math.min(40, requestedFloorCount));
         GeneratedFloor firstFloor = generateFloor(
-                level, dungeonId, 1, 0, -1, parameters.floorCount() == 1,
+                level, dungeonId, instanceSlot, 1, 0, -1, floorCount == 1,
                 parameters, List.of());
         DungeonCraft.LOGGER.info("Started Dungeon #{} with Floor 1 of {} generated",
-                dungeonId, parameters.floorCount());
+                dungeonId, floorCount);
         return new GeneratedDungeon(
-                dungeonId, parameters.floorCount(), firstFloor.spawn(), firstFloor.returnSwitch(),
+                dungeonId, instanceSlot, floorCount, firstFloor.spawn(), firstFloor.returnSwitch(),
                 firstFloor.floorExits(),
-                firstFloor.rooms());
+                firstFloor.rooms(), firstFloor.cleanupRegions());
     }
 
     public static GeneratedFloor generateNextFloor(
-            ServerLevel level, long dungeonId, int floorNumber, int firstRoomId,
+            ServerLevel level, long dungeonId, long instanceSlot,
+            int floorNumber, int firstRoomId,
             int selectedChoice, boolean finalFloor,
             List<DungeonFloorModifier.AppliedModifier> activeModifiers) {
         return generateFloor(
-                level, dungeonId, floorNumber, firstRoomId, selectedChoice, finalFloor,
+                level, dungeonId, instanceSlot, floorNumber, firstRoomId, selectedChoice, finalFloor,
                 GenerationParameters.fromConfig(), activeModifiers);
     }
 
     private static GeneratedFloor generateFloor(
-            ServerLevel level, long dungeonId, int floorNumber, int firstRoomId,
+            ServerLevel level, long dungeonId, long instanceSlot,
+            int floorNumber, int firstRoomId,
             int selectedChoice, boolean finalFloor, GenerationParameters parameters,
             List<DungeonFloorModifier.AppliedModifier> activeModifiers) {
         int floorIndex = floorNumber - 1;
@@ -72,7 +82,7 @@ public final class PrototypeDungeonGenerator {
                         ^ dungeonId * 0x9E3779B97F4A7C15L
                         ^ floorNumber * 0xC2B2AE3D27D4EB4FL
                         ^ (long)(selectedChoice + 1) * 0x165667B19E3779F9L);
-        BlockPos origin = originFor(dungeonId, floorIndex);
+        BlockPos origin = originFor(instanceSlot, floorIndex);
         int targetRooms = between(random, parameters.minRooms(), parameters.maxRooms());
 
         List<Room> rooms = createRoomGraph(random, origin, targetRooms, parameters);
@@ -147,8 +157,47 @@ public final class PrototypeDungeonGenerator {
                     room.entranceDirection().getName(),
                     List.copyOf(room.exitSealBlocks)));
         }
+        List<CleanupRegion> cleanupRegions = createCleanupRegions(rooms, parameters.corridorWidth());
         return new GeneratedFloor(
-                floorNumber, spawn, spawn, floorExits, List.copyOf(generatedRooms));
+                floorNumber, spawn, spawn, floorExits, List.copyOf(generatedRooms), cleanupRegions);
+    }
+
+    private static List<CleanupRegion> createCleanupRegions(List<Room> rooms, int corridorWidth) {
+        List<CleanupRegion> regions = new ArrayList<>();
+        for (Room room : rooms) {
+            regions.add(new CleanupRegion(
+                    room.centerX() - room.width() / 2 - 1,
+                    room.centerX() + room.width() / 2 + 1,
+                    FLOOR_Y - 1,
+                    FLOOR_Y + room.height() + 1,
+                    room.centerZ() - room.roomDepth() / 2 - 1,
+                    room.centerZ() + room.roomDepth() / 2 + 1));
+            if (room.parent() == null) {
+                continue;
+            }
+            int halfWidth = corridorWidth / 2;
+            Room first = room.parent();
+            if (first.centerX() != room.centerX()) {
+                Room west = first.centerX() < room.centerX() ? first : room;
+                Room east = west == first ? room : first;
+                regions.add(new CleanupRegion(
+                        west.centerX() + west.width() / 2,
+                        east.centerX() - east.width() / 2,
+                        FLOOR_Y - 1, FLOOR_Y + CORRIDOR_INTERIOR_HEIGHT + 2,
+                        west.centerZ() - halfWidth - 2,
+                        west.centerZ() + halfWidth + 2));
+            } else {
+                Room north = first.centerZ() < room.centerZ() ? first : room;
+                Room south = north == first ? room : first;
+                regions.add(new CleanupRegion(
+                        north.centerX() - halfWidth - 2,
+                        north.centerX() + halfWidth + 2,
+                        FLOOR_Y - 1, FLOOR_Y + CORRIDOR_INTERIOR_HEIGHT + 2,
+                        north.centerZ() + north.roomDepth() / 2,
+                        south.centerZ() - south.roomDepth() / 2));
+            }
+        }
+        return List.copyOf(regions);
     }
 
     private static List<Room> createRoomGraph(
@@ -237,28 +286,89 @@ public final class PrototypeDungeonGenerator {
         int halfWidth = room.width() / 2;
         int halfDepth = room.roomDepth() / 2;
         int ceilingY = FLOOR_Y + room.height();
+        RoomPalette palette = paletteFor(room.role);
         for (int x = room.centerX() - halfWidth; x <= room.centerX() + halfWidth; x++) {
             for (int z = room.centerZ() - halfDepth; z <= room.centerZ() + halfDepth; z++) {
                 set(level, x, FLOOR_Y - 1, z, Blocks.BEDROCK.defaultBlockState());
-                set(level, x, FLOOR_Y, z, Blocks.DEEPSLATE_BRICKS.defaultBlockState());
                 boolean wall = x == room.centerX() - halfWidth || x == room.centerX() + halfWidth
                         || z == room.centerZ() - halfDepth || z == room.centerZ() + halfDepth;
+                set(level, x, FLOOR_Y, z, roomFloorState(room, palette, x, z));
                 for (int y = PLAYER_Y; y < ceilingY; y++) {
-                    set(level, x, y, z, wall ? Blocks.BEDROCK.defaultBlockState() : Blocks.AIR.defaultBlockState());
+                    set(level, x, y, z, wall
+                            ? roomWallState(room, palette, x, y, z)
+                            : Blocks.AIR.defaultBlockState());
                 }
-                set(level, x, ceilingY, z, Blocks.BEDROCK.defaultBlockState());
+                set(level, x, ceilingY, z, roomCeilingState(room, palette, x, z));
+                set(level, x, ceilingY + 1, z, Blocks.BEDROCK.defaultBlockState());
             }
         }
-        addCeilingLights(level, room, ceilingY);
+        addRoomWallBacking(level, room, ceilingY);
+        addCeilingLights(level, room, ceilingY, palette);
     }
 
-    private static void addCeilingLights(ServerLevel level, Room room, int ceilingY) {
+    private static BlockState roomFloorState(
+            Room room, RoomPalette palette, int x, int z) {
+        int edgeDistance = Math.min(
+                room.width() / 2 - Math.abs(x - room.centerX()),
+                room.roomDepth() / 2 - Math.abs(z - room.centerZ()));
+        if (edgeDistance == 1 || (Math.abs(x - room.centerX()) + Math.abs(z - room.centerZ())) % 11 == 0) {
+            return palette.trim();
+        }
+        int noise = coordinateNoise(x, FLOOR_Y, z, room.depth());
+        if (noise < 9) {
+            return palette.worn();
+        }
+        return noise < 27 ? palette.secondary() : palette.floor();
+    }
+
+    private static BlockState roomWallState(
+            Room room, RoomPalette palette, int x, int y, int z) {
+        int relativeY = y - PLAYER_Y;
+        boolean foundation = relativeY == 0;
+        boolean cornice = y == FLOOR_Y + room.height() - 1;
+        boolean buttress = Math.floorMod(x - room.centerX(), 6) == 0
+                || Math.floorMod(z - room.centerZ(), 6) == 0;
+        if (foundation || cornice || buttress) {
+            return palette.trim();
+        }
+        return coordinateNoise(x, y, z, room.depth()) < 13
+                ? palette.worn()
+                : palette.wall();
+    }
+
+    private static BlockState roomCeilingState(
+            Room room, RoomPalette palette, int x, int z) {
+        boolean rib = Math.floorMod(x - room.centerX(), 5) == 0
+                || Math.floorMod(z - room.centerZ(), 5) == 0;
+        return rib ? palette.trim() : palette.ceiling();
+    }
+
+    /** Keeps the decorative wall mine-resistant without exposing bedrock to the room. */
+    private static void addRoomWallBacking(ServerLevel level, Room room, int ceilingY) {
+        int minX = room.centerX() - room.width() / 2;
+        int maxX = room.centerX() + room.width() / 2;
+        int minZ = room.centerZ() - room.roomDepth() / 2;
+        int maxZ = room.centerZ() + room.roomDepth() / 2;
+        for (int y = PLAYER_Y; y <= ceilingY + 1; y++) {
+            for (int x = minX - 1; x <= maxX + 1; x++) {
+                set(level, x, y, minZ - 1, Blocks.BEDROCK.defaultBlockState());
+                set(level, x, y, maxZ + 1, Blocks.BEDROCK.defaultBlockState());
+            }
+            for (int z = minZ; z <= maxZ; z++) {
+                set(level, minX - 1, y, z, Blocks.BEDROCK.defaultBlockState());
+                set(level, maxX + 1, y, z, Blocks.BEDROCK.defaultBlockState());
+            }
+        }
+    }
+
+    private static void addCeilingLights(
+            ServerLevel level, Room room, int ceilingY, RoomPalette palette) {
         int usableHalfWidth = Math.max(0, room.width() / 2 - 3);
         int usableHalfDepth = Math.max(0, room.roomDepth() / 2 - 3);
         for (int xOffset : centeredLightOffsets(usableHalfWidth)) {
             for (int zOffset : centeredLightOffsets(usableHalfDepth)) {
                 set(level, room.centerX() + xOffset, ceilingY, room.centerZ() + zOffset,
-                        Blocks.SEA_LANTERN.defaultBlockState());
+                        palette.light());
             }
         }
     }
@@ -295,31 +405,55 @@ public final class PrototypeDungeonGenerator {
 
     private static void createEastWestCorridor(ServerLevel level, int startX, int endX, int centerZ, int halfWidth) {
         for (int x = startX; x <= endX; x++) {
-            for (int z = centerZ - halfWidth - 1; z <= centerZ + halfWidth + 1; z++) {
+            for (int z = centerZ - halfWidth - 2; z <= centerZ + halfWidth + 2; z++) {
                 boolean wall = Math.abs(z - centerZ) == halfWidth + 1;
-                buildCorridorColumn(level, x, z, wall, x % 6 == 0 && z == centerZ);
+                boolean backing = Math.abs(z - centerZ) == halfWidth + 2;
+                buildCorridorColumn(level, x, z, wall, backing, Math.floorMod(x, 6) == 0 && z == centerZ);
             }
         }
     }
 
     private static void createNorthSouthCorridor(ServerLevel level, int startZ, int endZ, int centerX, int halfWidth) {
         for (int z = startZ; z <= endZ; z++) {
-            for (int x = centerX - halfWidth - 1; x <= centerX + halfWidth + 1; x++) {
+            for (int x = centerX - halfWidth - 2; x <= centerX + halfWidth + 2; x++) {
                 boolean wall = Math.abs(x - centerX) == halfWidth + 1;
-                buildCorridorColumn(level, x, z, wall, z % 6 == 0 && x == centerX);
+                boolean backing = Math.abs(x - centerX) == halfWidth + 2;
+                buildCorridorColumn(level, x, z, wall, backing, Math.floorMod(z, 6) == 0 && x == centerX);
             }
         }
     }
 
-    private static void buildCorridorColumn(ServerLevel level, int x, int z, boolean wall, boolean light) {
+    private static void buildCorridorColumn(
+            ServerLevel level, int x, int z, boolean wall, boolean backing, boolean light) {
         int ceilingY = FLOOR_Y + CORRIDOR_INTERIOR_HEIGHT + 1;
         set(level, x, FLOOR_Y - 1, z, Blocks.BEDROCK.defaultBlockState());
-        set(level, x, FLOOR_Y, z, Blocks.DEEPSLATE_TILES.defaultBlockState());
+        set(level, x, FLOOR_Y, z, backing
+                ? Blocks.BEDROCK.defaultBlockState()
+                : (coordinateNoise(x, FLOOR_Y, z, 0) < 18
+                        ? Blocks.CRACKED_DEEPSLATE_TILES.defaultBlockState()
+                        : Blocks.DEEPSLATE_TILES.defaultBlockState()));
         for (int y = PLAYER_Y; y < ceilingY; y++) {
-            set(level, x, y, z, wall ? Blocks.BEDROCK.defaultBlockState() : Blocks.AIR.defaultBlockState());
+            BlockState state = Blocks.AIR.defaultBlockState();
+            if (backing) {
+                state = Blocks.BEDROCK.defaultBlockState();
+            } else if (wall) {
+                boolean trim = y == PLAYER_Y || y == ceilingY - 1 || Math.floorMod(x + z, 6) == 0;
+                state = trim
+                        ? Blocks.POLISHED_DEEPSLATE.defaultBlockState()
+                        : (coordinateNoise(x, y, z, 0) < 12
+                                ? Blocks.CRACKED_DEEPSLATE_BRICKS.defaultBlockState()
+                                : Blocks.DEEPSLATE_BRICKS.defaultBlockState());
+            }
+            set(level, x, y, z, state);
         }
-        set(level, x, ceilingY, z,
-                light ? Blocks.SEA_LANTERN.defaultBlockState() : Blocks.BEDROCK.defaultBlockState());
+        set(level, x, ceilingY, z, backing
+                ? Blocks.BEDROCK.defaultBlockState()
+                : (light
+                        ? Blocks.SOUL_LANTERN.defaultBlockState().setValue(LanternBlock.HANGING, true)
+                        : Blocks.DEEPSLATE_TILES.defaultBlockState()));
+        if (!backing) {
+            set(level, x, ceilingY + 1, z, Blocks.BEDROCK.defaultBlockState());
+        }
     }
 
     private static void openEastWestDoor(ServerLevel level, int x, int centerZ, int halfWidth) {
@@ -369,15 +503,16 @@ public final class PrototypeDungeonGenerator {
         if (room.combatEncounter() != null) {
             room.combatEncounter().decorate(
                     level, room.centerX(), room.centerZ(), room.entranceDirection());
-            return;
+        } else {
+            switch (room.pattern()) {
+                case OPEN -> { }
+                case PILLARS -> addPillars(level, room);
+                case CENTRAL_DAIS -> addCentralDais(level, room);
+                case CROSS_FLOOR -> addCrossFloor(level, room);
+                case WORN_FLOOR -> addWornFloor(level, room);
+            }
         }
-        switch (room.pattern()) {
-            case OPEN -> { }
-            case PILLARS -> addPillars(level, room);
-            case CENTRAL_DAIS -> addCentralDais(level, room);
-            case CROSS_FLOOR -> addCrossFloor(level, room);
-            case WORN_FLOOR -> addWornFloor(level, room);
-        }
+        addRoleDecoration(level, room);
     }
 
     private static void addPillars(ServerLevel level, Room room) {
@@ -419,14 +554,100 @@ public final class PrototypeDungeonGenerator {
         }
     }
 
+    private static void addRoleDecoration(ServerLevel level, Room room) {
+        int offsetX = Math.max(3, room.width() / 2 - 3);
+        int offsetZ = Math.max(3, room.roomDepth() / 2 - 3);
+        switch (room.role) {
+            case START -> {
+                addLitPedestal(level, room.centerX() - 3, room.centerZ() - 3,
+                        Blocks.CHISELED_STONE_BRICKS.defaultBlockState(), false);
+                addLitPedestal(level, room.centerX() + 3, room.centerZ() - 3,
+                        Blocks.CHISELED_STONE_BRICKS.defaultBlockState(), false);
+                addLitPedestal(level, room.centerX() - 3, room.centerZ() + 3,
+                        Blocks.MOSSY_STONE_BRICKS.defaultBlockState(), false);
+                addLitPedestal(level, room.centerX() + 3, room.centerZ() + 3,
+                        Blocks.MOSSY_STONE_BRICKS.defaultBlockState(), false);
+            }
+            case NORMAL -> {
+                addRubble(level, room.centerX() - offsetX, room.centerZ() + offsetZ);
+                addRubble(level, room.centerX() + offsetX, room.centerZ() - offsetZ);
+                set(level, room.centerX() - offsetX, FLOOR_Y + room.height() - 2,
+                        room.centerZ() - offsetZ, Blocks.COBWEB.defaultBlockState());
+            }
+            case COMBAT -> {
+                for (int xSign : List.of(-1, 1)) {
+                    for (int zSign : List.of(-1, 1)) {
+                        addLitPedestal(level,
+                                room.centerX() + xSign * offsetX,
+                                room.centerZ() + zSign * offsetZ,
+                                Blocks.RED_NETHER_BRICKS.defaultBlockState(), true);
+                    }
+                }
+            }
+            case LOOT -> {
+                for (int step = -3; step <= 3; step++) {
+                    set(level, room.centerX() + step, FLOOR_Y, room.centerZ() - 3,
+                            Blocks.GILDED_BLACKSTONE.defaultBlockState());
+                    set(level, room.centerX() + step, FLOOR_Y, room.centerZ() + 3,
+                            Blocks.GILDED_BLACKSTONE.defaultBlockState());
+                }
+                addLitPedestal(level, room.centerX() - offsetX, room.centerZ() - offsetZ,
+                        Blocks.CHISELED_POLISHED_BLACKSTONE.defaultBlockState(), false);
+                addLitPedestal(level, room.centerX() + offsetX, room.centerZ() - offsetZ,
+                        Blocks.CHISELED_POLISHED_BLACKSTONE.defaultBlockState(), false);
+            }
+            case REST -> {
+                for (int step = -4; step <= 4; step++) {
+                    if (Math.abs(step) <= 2) {
+                        continue;
+                    }
+                    set(level, room.centerX() + step, PLAYER_Y, room.centerZ(),
+                            Blocks.MOSS_CARPET.defaultBlockState());
+                    set(level, room.centerX(), PLAYER_Y, room.centerZ() + step,
+                            Blocks.MOSS_CARPET.defaultBlockState());
+                }
+                addLitPedestal(level, room.centerX() - offsetX, room.centerZ() + offsetZ,
+                        Blocks.PRISMARINE_BRICKS.defaultBlockState(), false);
+                addLitPedestal(level, room.centerX() + offsetX, room.centerZ() + offsetZ,
+                        Blocks.PRISMARINE_BRICKS.defaultBlockState(), false);
+            }
+            case EXIT -> {
+                for (int xSign : List.of(-1, 1)) {
+                    int x = room.centerX() + xSign * offsetX;
+                    int z = room.centerZ() - offsetZ;
+                    for (int y = PLAYER_Y; y <= PLAYER_Y + 2; y++) {
+                        set(level, x, y, z, y == PLAYER_Y + 1
+                                ? Blocks.CRYING_OBSIDIAN.defaultBlockState()
+                                : Blocks.OBSIDIAN.defaultBlockState());
+                    }
+                    set(level, x, PLAYER_Y + 3, z, Blocks.END_ROD.defaultBlockState());
+                }
+            }
+        }
+    }
+
+    private static void addLitPedestal(
+            ServerLevel level, int x, int z, BlockState base, boolean soulLight) {
+        set(level, x, PLAYER_Y, z, base);
+        set(level, x, PLAYER_Y + 1, z, soulLight
+                ? Blocks.SOUL_LANTERN.defaultBlockState()
+                : Blocks.LANTERN.defaultBlockState());
+    }
+
+    private static void addRubble(ServerLevel level, int x, int z) {
+        set(level, x, PLAYER_Y, z, Blocks.COBBLED_DEEPSLATE.defaultBlockState());
+        set(level, x + 1, PLAYER_Y, z, Blocks.COBBLED_DEEPSLATE_WALL.defaultBlockState());
+        set(level, x, PLAYER_Y, z - 1, Blocks.DEEPSLATE_BRICK_SLAB.defaultBlockState());
+    }
+
     private static void placeRoleMarker(ServerLevel level, Room room) {
         BlockState marker = switch (room.role) {
-            case START -> Blocks.EMERALD_BLOCK.defaultBlockState();
-            case NORMAL -> Blocks.STONE_BRICKS.defaultBlockState();
-            case COMBAT -> Blocks.REDSTONE_BLOCK.defaultBlockState();
-            case LOOT -> Blocks.GOLD_BLOCK.defaultBlockState();
-            case REST -> Blocks.LAPIS_BLOCK.defaultBlockState();
-            case EXIT -> Blocks.LODESTONE.defaultBlockState();
+            case START -> Blocks.CHISELED_STONE_BRICKS.defaultBlockState();
+            case NORMAL -> Blocks.CHISELED_DEEPSLATE.defaultBlockState();
+            case COMBAT -> Blocks.RED_NETHER_BRICKS.defaultBlockState();
+            case LOOT -> Blocks.GILDED_BLACKSTONE.defaultBlockState();
+            case REST -> Blocks.PRISMARINE_BRICKS.defaultBlockState();
+            case EXIT -> Blocks.CRYING_OBSIDIAN.defaultBlockState();
         };
         set(level, room.centerX(), FLOOR_Y, room.centerZ(), marker);
     }
@@ -506,13 +727,78 @@ public final class PrototypeDungeonGenerator {
         return switchPos;
     }
 
+    private static RoomPalette paletteFor(RoomRole role) {
+        return switch (role) {
+            case START -> new RoomPalette(
+                    Blocks.STONE_BRICKS.defaultBlockState(),
+                    Blocks.MOSSY_STONE_BRICKS.defaultBlockState(),
+                    Blocks.CRACKED_STONE_BRICKS.defaultBlockState(),
+                    Blocks.STONE_BRICKS.defaultBlockState(),
+                    Blocks.TUFF_BRICKS.defaultBlockState(),
+                    Blocks.POLISHED_ANDESITE.defaultBlockState(),
+                    Blocks.GLOWSTONE.defaultBlockState());
+            case NORMAL -> new RoomPalette(
+                    Blocks.DEEPSLATE_BRICKS.defaultBlockState(),
+                    Blocks.DEEPSLATE_TILES.defaultBlockState(),
+                    Blocks.CRACKED_DEEPSLATE_BRICKS.defaultBlockState(),
+                    Blocks.DEEPSLATE_BRICKS.defaultBlockState(),
+                    Blocks.DEEPSLATE_TILES.defaultBlockState(),
+                    Blocks.POLISHED_DEEPSLATE.defaultBlockState(),
+                    Blocks.SOUL_LANTERN.defaultBlockState().setValue(LanternBlock.HANGING, true));
+            case COMBAT -> new RoomPalette(
+                    Blocks.POLISHED_BLACKSTONE_BRICKS.defaultBlockState(),
+                    Blocks.NETHER_BRICKS.defaultBlockState(),
+                    Blocks.CRACKED_POLISHED_BLACKSTONE_BRICKS.defaultBlockState(),
+                    Blocks.NETHER_BRICKS.defaultBlockState(),
+                    Blocks.DEEPSLATE_TILES.defaultBlockState(),
+                    Blocks.RED_NETHER_BRICKS.defaultBlockState(),
+                    Blocks.SHROOMLIGHT.defaultBlockState());
+            case LOOT -> new RoomPalette(
+                    Blocks.POLISHED_BLACKSTONE_BRICKS.defaultBlockState(),
+                    Blocks.DEEPSLATE_TILES.defaultBlockState(),
+                    Blocks.CRACKED_POLISHED_BLACKSTONE_BRICKS.defaultBlockState(),
+                    Blocks.POLISHED_BLACKSTONE_BRICKS.defaultBlockState(),
+                    Blocks.DEEPSLATE_TILES.defaultBlockState(),
+                    Blocks.GILDED_BLACKSTONE.defaultBlockState(),
+                    Blocks.GLOWSTONE.defaultBlockState());
+            case REST -> new RoomPalette(
+                    Blocks.STONE_BRICKS.defaultBlockState(),
+                    Blocks.MOSSY_STONE_BRICKS.defaultBlockState(),
+                    Blocks.CRACKED_STONE_BRICKS.defaultBlockState(),
+                    Blocks.MOSSY_STONE_BRICKS.defaultBlockState(),
+                    Blocks.TUFF_BRICKS.defaultBlockState(),
+                    Blocks.PRISMARINE_BRICKS.defaultBlockState(),
+                    Blocks.SEA_LANTERN.defaultBlockState());
+            case EXIT -> new RoomPalette(
+                    Blocks.DEEPSLATE_TILES.defaultBlockState(),
+                    Blocks.POLISHED_BLACKSTONE_BRICKS.defaultBlockState(),
+                    Blocks.CRACKED_DEEPSLATE_TILES.defaultBlockState(),
+                    Blocks.POLISHED_BLACKSTONE_BRICKS.defaultBlockState(),
+                    Blocks.OBSIDIAN.defaultBlockState(),
+                    Blocks.CRYING_OBSIDIAN.defaultBlockState(),
+                    Blocks.SEA_LANTERN.defaultBlockState());
+        };
+    }
+
+    private static int coordinateNoise(int x, int y, int z, int salt) {
+        long value = x * 0x632BE59BD9B4E019L
+                ^ y * 0x9E3779B97F4A7C15L
+                ^ z * 0xC2B2AE3D27D4EB4FL
+                ^ salt * 0x165667B19E3779F9L;
+        value ^= value >>> 30;
+        value *= 0xBF58476D1CE4E5B9L;
+        value ^= value >>> 27;
+        return (int)Math.floorMod(value, 100L);
+    }
+
     private static void set(ServerLevel level, int x, int y, int z, BlockState state) {
         level.setBlock(new BlockPos(x, y, z), state, UPDATE_FLAGS);
     }
 
-    private static BlockPos originFor(long dungeonId, int floorIndex) {
-        long dungeonIndex = Math.max(0L, dungeonId - 1L);
-        long index = dungeonIndex * FLOOR_SLOTS_PER_DUNGEON + floorIndex;
+    private static BlockPos originFor(long instanceSlot, int floorIndex) {
+        long safeInstanceSlot = Math.max(0L, instanceSlot);
+        long index = safeInstanceSlot * FLOOR_SLOTS_PER_INSTANCE
+                + Math.floorMod(floorIndex, FLOOR_SLOTS_PER_INSTANCE);
         int column = (int)Math.floorMod(index, REGIONS_PER_ROW);
         int row = (int)Math.floorMod(index / REGIONS_PER_ROW, REGIONS_PER_ROW);
         return new BlockPos(column * REGION_SPACING, FLOOR_Y, row * REGION_SPACING);
@@ -533,9 +819,9 @@ public final class PrototypeDungeonGenerator {
     }
 
     public record GeneratedDungeon(
-            long dungeonId, int floorCount, BlockPos spawn, BlockPos returnSwitch,
+            long dungeonId, long instanceSlot, int floorCount, BlockPos spawn, BlockPos returnSwitch,
             List<GeneratedFloorExit> floorExits,
-            List<GeneratedRoom> rooms) {
+            List<GeneratedRoom> rooms, List<CleanupRegion> cleanupRegions) {
         public int roomCount() {
             return rooms.size();
         }
@@ -551,13 +837,22 @@ public final class PrototypeDungeonGenerator {
     public record GeneratedFloor(
             int floorNumber, BlockPos spawn, BlockPos returnSwitch,
             List<GeneratedFloorExit> floorExits,
-            List<GeneratedRoom> rooms) {
+            List<GeneratedRoom> rooms, List<CleanupRegion> cleanupRegions) {
+    }
+
+    public record CleanupRegion(
+            int minX, int maxX, int minY, int maxY, int minZ, int maxZ) {
     }
 
     public record GeneratedRoom(
             int roomId, int minX, int maxX, int minZ, int maxZ, String role,
             String encounterId, String entranceDirection,
             List<BlockPos> exitSealBlocks) {
+    }
+
+    private record RoomPalette(
+            BlockState floor, BlockState secondary, BlockState worn,
+            BlockState wall, BlockState ceiling, BlockState trim, BlockState light) {
     }
 
     private record GenerationParameters(
@@ -627,8 +922,9 @@ public final class PrototypeDungeonGenerator {
 
         private void applyEncounter(DungeonCombatEncounter encounter) {
             combatEncounter = encounter;
-            width = encounter.width();
-            roomDepth = encounter.depth();
+            boolean rotated = entranceDirection().getAxis() == net.minecraft.core.Direction.Axis.X;
+            width = rotated ? encounter.depth() : encounter.width();
+            roomDepth = rotated ? encounter.width() : encounter.depth();
             height = encounter.height();
         }
 

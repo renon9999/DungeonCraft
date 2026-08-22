@@ -19,8 +19,8 @@ public enum DungeonCombatEncounter {
             slot(EnemyKind.ZOMBIE, 0, 3),
             slot(EnemyKind.SKELETON, -6, 6, 2), slot(EnemyKind.SKELETON, 6, 6, 2))),
     PILLAR_AMBUSH("pillar_ambush", 1, 23, 23, 8, 22, List.of(
-            slot(EnemyKind.ZOMBIE, 0, 1), slot(EnemyKind.SPIDER, -6, 1),
-            slot(EnemyKind.SPIDER, 6, 1), slot(EnemyKind.SKELETON, 0, 7))),
+            slot(EnemyKind.ZOMBIE, 0, 1), slot(EnemyKind.SPIDER, -6, 2),
+            slot(EnemyKind.SPIDER, 6, 2), slot(EnemyKind.SKELETON, 0, 7))),
     CHOKEPOINT_DEFENSE("chokepoint_defense", 1, 19, 27, 7, 20, List.of(
             slot(EnemyKind.ZOMBIE, -1, 0), slot(EnemyKind.ZOMBIE, 1, 2),
             slot(EnemyKind.ZOMBIE, 0, 4),

@@ -37,7 +37,11 @@ public final class DungeonRoomEnemySpawner {
             BlockPos spawnPos = DungeonCombatEncounter.position(
                     room.centerX(), room.centerZ(), entrance,
                     slot.side() + sideSpread, slot.depth(), slot.yOffset());
-            Mob enemy = spawnEnemy(level, spawnPos, slot.kind());
+            BlockPos safeSpawnPos = findSafeSpawnPosition(level, room, spawnPos, slot.kind());
+            if (safeSpawnPos == null) {
+                continue;
+            }
+            Mob enemy = spawnEnemy(level, safeSpawnPos, slot.kind());
             if (enemy == null) {
                 continue;
             }
@@ -48,6 +52,74 @@ public final class DungeonRoomEnemySpawner {
             enemyIds.add(enemy.getUUID());
         }
         return new SpawnedEnemies(java.util.List.copyOf(enemyIds), encounter.id());
+    }
+
+    /**
+     * Keeps fixed encounter layouts while recovering from walls, pillars and added decorations.
+     * Candidates are checked from the requested position outwards and never leave the room interior.
+     */
+    private static BlockPos findSafeSpawnPosition(
+            ServerLevel level, DungeonProgressData.EnteredRoom room,
+            BlockPos requested, DungeonCombatEncounter.EnemyKind kind) {
+        for (int radius = 0; radius <= 4; radius++) {
+            for (int xOffset = -radius; xOffset <= radius; xOffset++) {
+                int zOffset = radius - Math.abs(xOffset);
+                BlockPos first = requested.offset(xOffset, 0, zOffset);
+                if (isSafeSpawnPosition(level, room, first, kind)) {
+                    return first;
+                }
+                if (zOffset != 0) {
+                    BlockPos second = requested.offset(xOffset, 0, -zOffset);
+                    if (isSafeSpawnPosition(level, room, second, kind)) {
+                        return second;
+                    }
+                }
+            }
+        }
+        return null;
+    }
+
+    private static boolean isSafeSpawnPosition(
+            ServerLevel level, DungeonProgressData.EnteredRoom room,
+            BlockPos position, DungeonCombatEncounter.EnemyKind kind) {
+        int horizontalClearance = requiresWideClearance(kind) ? 1 : 0;
+        int height = requiredHeight(kind);
+        if (position.getX() - horizontalClearance < room.minX()
+                || position.getX() + horizontalClearance > room.maxX()
+                || position.getZ() - horizontalClearance < room.minZ()
+                || position.getZ() + horizontalClearance > room.maxZ()) {
+            return false;
+        }
+        for (int x = position.getX() - horizontalClearance;
+             x <= position.getX() + horizontalClearance; x++) {
+            for (int z = position.getZ() - horizontalClearance;
+                 z <= position.getZ() + horizontalClearance; z++) {
+                BlockPos floor = new BlockPos(x, position.getY() - 1, z);
+                if (level.getBlockState(floor).getCollisionShape(level, floor).isEmpty()) {
+                    return false;
+                }
+                for (int yOffset = 0; yOffset < height; yOffset++) {
+                    BlockPos body = new BlockPos(x, position.getY() + yOffset, z);
+                    if (!level.getBlockState(body).getCollisionShape(level, body).isEmpty()) {
+                        return false;
+                    }
+                }
+            }
+        }
+        return true;
+    }
+
+    private static boolean requiresWideClearance(DungeonCombatEncounter.EnemyKind kind) {
+        return kind == DungeonCombatEncounter.EnemyKind.SPIDER
+                || kind == DungeonCombatEncounter.EnemyKind.RAVAGER;
+    }
+
+    private static int requiredHeight(DungeonCombatEncounter.EnemyKind kind) {
+        return switch (kind) {
+            case ENDERMAN, RAVAGER, WITHER_SKELETON -> 3;
+            case SPIDER, ENDERMITE, SHULKER -> 1;
+            default -> 2;
+        };
     }
 
     private static Mob spawnEnemy(
