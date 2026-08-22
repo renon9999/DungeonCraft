@@ -1,0 +1,393 @@
+[generation]
+	#Minimum number of rooms in a generated prototype dungeon.
+	# Default: 5
+	# Range: 3 ~ 20
+	minRooms = 5
+	#Maximum number of rooms in a generated prototype dungeon.
+	# Default: 8
+	# Range: 3 ~ 20
+	maxRooms = 8
+	#Minimum room width/depth. Even values are adjusted to an odd value.
+	# Default: 17
+	# Range: 7 ~ 35
+	minRoomSize = 17
+	#Maximum room width/depth. Even values are adjusted to an odd value.
+	# Default: 29
+	# Range: 7 ~ 35
+	maxRoomSize = 29
+	#Minimum room interior height.
+	# Default: 6
+	# Range: 5 ~ 10
+	minRoomHeight = 6
+	#Maximum room interior height.
+	# Default: 8
+	# Range: 5 ~ 10
+	maxRoomHeight = 8
+	#Distance between logical room centers. Larger values create longer corridors.
+	# Default: 38
+	# Range: 38 ~ 56
+	cellSpacing = 38
+	#Corridor interior width. Even values are adjusted to an odd value.
+	# Default: 3
+	# Range: 3 ~ 5
+	corridorWidth = 3
+	#Chance to grow from a random frontier room instead of the newest room.
+	# Default: 0.4
+	# Range: 0.0 ~ 1.0
+	branchChance = 0.4
+	#Chance for an ordinary room to become a COMBAT room.
+	# Default: 1.0
+	# Range: 0.0 ~ 1.0
+	combatRoomChance = 1.0
+	#Whether one dedicated LOOT room is assigned during dungeon generation.
+	lootRoomEnabled = true
+	#Legacy/default floor count. Portal UI selections can create up to 40 floors.
+	# Default: 6
+	# Range: 1 ~ 40
+	floorCount = 6
+
+[combat]
+	#Base multiplier applied to the complete enemy party in a COMBAT encounter.
+	# Default: 1
+	# Range: 1 ~ 3
+	enemyCount = 1
+
+[multiplayer]
+	#Maximum number of players allowed in one dungeon party.
+	# Default: 8
+	# Range: 1 ~ 8
+	maxPartySize = 8
+	#Players within this distance of the used DC Portal join its dungeon party.
+	# Default: 8.0
+	# Range: 1.0 ~ 32.0
+	joinRadius = 8.0
+
+[modifier]
+	#Minimum number of positive modifiers offered by one Floor Choice.
+	# Default: 1
+	# Range: 1 ~ 3
+	minPositiveCount = 1
+	#Maximum number of positive modifiers offered by one Floor Choice.
+	# Default: 3
+	# Range: 1 ~ 3
+	maxPositiveCount = 3
+	#Minimum number of negative modifiers offered by one Floor Choice.
+	# Default: 1
+	# Range: 1 ~ 3
+	minNegativeCount = 1
+	#Maximum number of negative modifiers offered by one Floor Choice.
+	# Default: 3
+	# Range: 1 ~ 3
+	maxNegativeCount = 3
+	#Highest Tier increment available to generated Floor Choices.
+	# Default: 3
+	# Range: 1 ~ 3
+	maxTier = 3
+	#Maximum accumulated Tier for one active modifier.
+	# Default: 5
+	# Range: 1 ~ 5
+	maxAccumulatedTier = 5
+
+	[modifier.lootEffects]
+		#Extra LOOT-room chests from Chest Increase T1.
+		# Default: 0
+		# Range: 0 ~ 4
+		extraChestsT1 = 0
+		#Extra LOOT-room chests from Chest Increase T2.
+		# Default: 1
+		# Range: 0 ~ 4
+		extraChestsT2 = 1
+		#Extra LOOT-room chests from Chest Increase T3.
+		# Default: 2
+		# Range: 0 ~ 4
+		extraChestsT3 = 2
+		#Modifier effect multiplier for lootAmountT1.
+		# Default: 1.1
+		# Range: 1.0 ~ 10.0
+		lootAmountT1 = 1.1
+		#Modifier effect multiplier for lootAmountT2.
+		# Default: 1.2
+		# Range: 1.0 ~ 10.0
+		lootAmountT2 = 1.2
+		#Modifier effect multiplier for lootAmountT3.
+		# Default: 1.4
+		# Range: 1.0 ~ 10.0
+		lootAmountT3 = 1.4
+		#Modifier effect chance for lootQualityChanceT1.
+		# Default: 0.15
+		# Range: 0.0 ~ 1.0
+		lootQualityChanceT1 = 0.15
+		#Modifier effect chance for lootQualityChanceT2.
+		# Default: 0.25
+		# Range: 0.0 ~ 1.0
+		lootQualityChanceT2 = 0.25
+		#Modifier effect chance for lootQualityChanceT3.
+		# Default: 0.4
+		# Range: 0.0 ~ 1.0
+		lootQualityChanceT3 = 0.4
+		#Modifier effect chance for oreLootChanceT1.
+		# Default: 0.2
+		# Range: 0.0 ~ 1.0
+		oreLootChanceT1 = 0.2
+		#Modifier effect chance for oreLootChanceT2.
+		# Default: 0.3
+		# Range: 0.0 ~ 1.0
+		oreLootChanceT2 = 0.3
+		#Modifier effect chance for oreLootChanceT3.
+		# Default: 0.45
+		# Range: 0.0 ~ 1.0
+		oreLootChanceT3 = 0.45
+		#Modifier effect chance for enchantedLootChanceT1.
+		# Default: 0.15
+		# Range: 0.0 ~ 1.0
+		enchantedLootChanceT1 = 0.15
+		#Modifier effect chance for enchantedLootChanceT2.
+		# Default: 0.25
+		# Range: 0.0 ~ 1.0
+		enchantedLootChanceT2 = 0.25
+		#Modifier effect chance for enchantedLootChanceT3.
+		# Default: 0.4
+		# Range: 0.0 ~ 1.0
+		enchantedLootChanceT3 = 0.4
+		#Enchanting cost used for enchantmentCostT1.
+		# Default: 5
+		# Range: 1 ~ 100
+		enchantmentCostT1 = 5
+		#Enchanting cost used for enchantmentCostT2.
+		# Default: 10
+		# Range: 1 ~ 100
+		enchantmentCostT2 = 10
+		#Enchanting cost used for enchantmentCostT3.
+		# Default: 20
+		# Range: 1 ~ 100
+		enchantmentCostT3 = 20
+		#Modifier effect chance for foodLootChanceT1.
+		# Default: 0.25
+		# Range: 0.0 ~ 1.0
+		foodLootChanceT1 = 0.25
+		#Modifier effect chance for foodLootChanceT2.
+		# Default: 0.4
+		# Range: 0.0 ~ 1.0
+		foodLootChanceT2 = 0.4
+		#Modifier effect chance for foodLootChanceT3.
+		# Default: 0.55
+		# Range: 0.0 ~ 1.0
+		foodLootChanceT3 = 0.55
+		#Modifier effect multiplier for experienceMultiplierT1.
+		# Default: 1.1
+		# Range: 1.0 ~ 10.0
+		experienceMultiplierT1 = 1.1
+		#Modifier effect multiplier for experienceMultiplierT2.
+		# Default: 1.2
+		# Range: 1.0 ~ 10.0
+		experienceMultiplierT2 = 1.2
+		#Modifier effect multiplier for experienceMultiplierT3.
+		# Default: 1.4
+		# Range: 1.0 ~ 10.0
+		experienceMultiplierT3 = 1.4
+		#Extra LOOT-room chests from Chest Increase T5.
+		# Default: 4
+		# Range: 0 ~ 4
+		extraChestsT5 = 4
+		#Modifier effect multiplier for lootAmountT5.
+		# Default: 1.75
+		# Range: 1.0 ~ 10.0
+		lootAmountT5 = 1.75
+		#Modifier effect chance for lootQualityChanceT5.
+		# Default: 0.65
+		# Range: 0.0 ~ 1.0
+		lootQualityChanceT5 = 0.65
+		#Modifier effect chance for oreLootChanceT5.
+		# Default: 0.7
+		# Range: 0.0 ~ 1.0
+		oreLootChanceT5 = 0.7
+		#Modifier effect chance for enchantedLootChanceT5.
+		# Default: 0.65
+		# Range: 0.0 ~ 1.0
+		enchantedLootChanceT5 = 0.65
+		#Enchanting cost used for enchantmentCostT5.
+		# Default: 35
+		# Range: 1 ~ 100
+		enchantmentCostT5 = 35
+		#Modifier effect chance for foodLootChanceT5.
+		# Default: 0.8
+		# Range: 0.0 ~ 1.0
+		foodLootChanceT5 = 0.8
+		#Modifier effect multiplier for experienceMultiplierT5.
+		# Default: 2.0
+		# Range: 1.0 ~ 10.0
+		experienceMultiplierT5 = 2.0
+		#Modifier effect multiplier for lootSlotsT1.
+		# Default: 1.5
+		# Range: 1.0 ~ 10.0
+		lootSlotsT1 = 1.5
+		#Modifier effect multiplier for lootSlotsT2.
+		# Default: 2.0
+		# Range: 1.0 ~ 10.0
+		lootSlotsT2 = 2.0
+		#Modifier effect multiplier for lootSlotsT3.
+		# Default: 3.0
+		# Range: 1.0 ~ 10.0
+		lootSlotsT3 = 3.0
+		#Modifier effect multiplier for lootSlotsT5.
+		# Default: 5.0
+		# Range: 1.0 ~ 10.0
+		lootSlotsT5 = 5.0
+		#Modifier effect chance for rareLootChanceT4.
+		# Default: 0.0025
+		# Range: 0.0 ~ 1.0
+		rareLootChanceT4 = 0.0025
+		#Modifier effect chance for rareLootChanceT5.
+		# Default: 0.005
+		# Range: 0.0 ~ 1.0
+		rareLootChanceT5 = 0.005
+		#Modifier effect chance for strongBookChanceT1.
+		# Default: 0.005
+		# Range: 0.0 ~ 1.0
+		strongBookChanceT1 = 0.005
+		#Modifier effect chance for strongBookChanceT2.
+		# Default: 0.0075
+		# Range: 0.0 ~ 1.0
+		strongBookChanceT2 = 0.0075
+		#Modifier effect chance for strongBookChanceT3.
+		# Default: 0.01
+		# Range: 0.0 ~ 1.0
+		strongBookChanceT3 = 0.01
+		#Modifier effect chance for strongBookChanceT4.
+		# Default: 0.015
+		# Range: 0.0 ~ 1.0
+		strongBookChanceT4 = 0.015
+		#Modifier effect chance for strongBookChanceT5.
+		# Default: 0.02
+		# Range: 0.0 ~ 1.0
+		strongBookChanceT5 = 0.02
+
+	[modifier.enemyEffects]
+		#Enemy party size multiplier from Enemy Count T1.
+		# Default: 1.15
+		# Range: 1.0 ~ 10.0
+		enemyCountT1 = 1.15
+		#Enemy party size multiplier from Enemy Count T2.
+		# Default: 1.3
+		# Range: 1.0 ~ 10.0
+		enemyCountT2 = 1.3
+		#Enemy party size multiplier from Enemy Count T3.
+		# Default: 1.5
+		# Range: 1.0 ~ 10.0
+		enemyCountT3 = 1.5
+		#Enemy modifier chance for enemyEquipmentChanceT1.
+		# Default: 0.2
+		# Range: 0.0 ~ 1.0
+		enemyEquipmentChanceT1 = 0.2
+		#Enemy modifier chance for enemyEquipmentChanceT2.
+		# Default: 0.35
+		# Range: 0.0 ~ 1.0
+		enemyEquipmentChanceT2 = 0.35
+		#Enemy modifier chance for enemyEquipmentChanceT3.
+		# Default: 0.5
+		# Range: 0.0 ~ 1.0
+		enemyEquipmentChanceT3 = 0.5
+		#Enemy modifier chance for enchantedEnemyChanceT1.
+		# Default: 0.1
+		# Range: 0.0 ~ 1.0
+		enchantedEnemyChanceT1 = 0.1
+		#Enemy modifier chance for enchantedEnemyChanceT2.
+		# Default: 0.2
+		# Range: 0.0 ~ 1.0
+		enchantedEnemyChanceT2 = 0.2
+		#Enemy modifier chance for enchantedEnemyChanceT3.
+		# Default: 0.35
+		# Range: 0.0 ~ 1.0
+		enchantedEnemyChanceT3 = 0.35
+		#Enemy equipment enchanting cost for enemyEnchantmentCostT1.
+		# Default: 5
+		# Range: 1 ~ 100
+		enemyEnchantmentCostT1 = 5
+		#Enemy equipment enchanting cost for enemyEnchantmentCostT2.
+		# Default: 10
+		# Range: 1 ~ 100
+		enemyEnchantmentCostT2 = 10
+		#Enemy equipment enchanting cost for enemyEnchantmentCostT3.
+		# Default: 15
+		# Range: 1 ~ 100
+		enemyEnchantmentCostT3 = 15
+		#Enemy party size multiplier from Enemy Count T5.
+		# Default: 2.25
+		# Range: 1.0 ~ 10.0
+		enemyCountT5 = 2.25
+		#Enemy modifier chance for enemyEquipmentChanceT5.
+		# Default: 0.8
+		# Range: 0.0 ~ 1.0
+		enemyEquipmentChanceT5 = 0.8
+		#Enemy modifier chance for enchantedEnemyChanceT5.
+		# Default: 0.7
+		# Range: 0.0 ~ 1.0
+		enchantedEnemyChanceT5 = 0.7
+		#Enemy equipment enchanting cost for enemyEnchantmentCostT5.
+		# Default: 30
+		# Range: 1 ~ 100
+		enemyEnchantmentCostT5 = 30
+
+	[modifier.playerEffects]
+		#Additional exhaustion applied each second for hungerExhaustionPerSecondT1.
+		# Default: 0.05
+		# Range: 0.0 ~ 20.0
+		hungerExhaustionPerSecondT1 = 0.05
+		#Additional exhaustion applied each second for hungerExhaustionPerSecondT2.
+		# Default: 0.1
+		# Range: 0.0 ~ 20.0
+		hungerExhaustionPerSecondT2 = 0.1
+		#Additional exhaustion applied each second for hungerExhaustionPerSecondT3.
+		# Default: 0.15
+		# Range: 0.0 ~ 20.0
+		hungerExhaustionPerSecondT3 = 0.15
+		#Additional exhaustion applied each second for hungerExhaustionPerSecondT5.
+		# Default: 0.3
+		# Range: 0.0 ~ 20.0
+		hungerExhaustionPerSecondT5 = 0.3
+
+[loot]
+	#Chance for a NORMAL room to contain a chest. LOOT rooms always contain one; COMBAT rooms never do.
+	# Default: 0.25
+	# Range: 0.0 ~ 1.0
+	extraChestChance = 0.25
+	#Chance for a generated chest to contain food.
+	# Default: 0.8
+	# Range: 0.0 ~ 1.0
+	foodChance = 0.8
+	#Minimum food item count.
+	# Default: 2
+	# Range: 1 ~ 64
+	foodMin = 2
+	#Maximum food item count.
+	# Default: 6
+	# Range: 1 ~ 64
+	foodMax = 6
+	#Chance for a generated chest to contain arrows.
+	# Default: 0.2
+	# Range: 0.0 ~ 1.0
+	arrowChance = 0.2
+	#Minimum arrow count.
+	# Default: 4
+	# Range: 1 ~ 64
+	arrowMin = 4
+	#Maximum arrow count.
+	# Default: 16
+	# Range: 1 ~ 64
+	arrowMax = 16
+	#Chance for a generated chest to contain a material stack.
+	# Default: 0.45
+	# Range: 0.0 ~ 1.0
+	materialChance = 0.45
+	#Minimum material item count.
+	# Default: 2
+	# Range: 1 ~ 64
+	materialMin = 2
+	#Maximum material item count.
+	# Default: 8
+	# Range: 1 ~ 64
+	materialMax = 8
+	#Chance for a generated chest to contain one equipment item.
+	# Default: 0.25
+	# Range: 0.0 ~ 1.0
+	equipmentChance = 0.25
